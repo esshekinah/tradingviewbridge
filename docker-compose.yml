@@ -1,58 +1,44 @@
 version: '3.8'
 
 services:
-  traefik:
-    image: traefik:v2.10
-    container_name: traefik
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-    ports:
-      - "80:80"
-      - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - tradingview-network
-    restart: unless-stopped
-
   tradingview-webhook:
     build:
       context: .
       dockerfile: Dockerfile
+
     container_name: tradingview-webhook-bridge
-    ports:
-      - "25345:25345"
+
+    # ✅ IMPORTANT: do NOT expose publicly
     expose:
       - "25345"
+
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=INFO
       - ENVIRONMENT=production
+
     restart: unless-stopped
+
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:25345/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 5s
+
     volumes:
       - tradingview-logs:/app/logs
+
     networks:
       - tradingview-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.webhook.rule=Host(`ctrader.emmanuelshekinah.co.za`)"
-      - "traefik.http.routers.webhook.entrypoints=web"
-      - "traefik.http.routers.webhook.service=webhook-service"
-      - "traefik.http.services.webhook-service.loadbalancer.server.port=25345"
+
+    # ⚠️ NOTE: deploy section only works in Docker Swarm
     deploy:
       resources:
         limits:
