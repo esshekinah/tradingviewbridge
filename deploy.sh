@@ -3,6 +3,7 @@
 ################################################################################
 # TradingView Webhook Bridge - Deployment Script
 # Deploys to Dokploy with Nginx configuration for dual port support
+# Uses port 5009 (Nginx) and port 25345 (FastAPI direct)
 # Usage: sudo bash deploy.sh
 ################################################################################
 
@@ -17,6 +18,8 @@ NC='\033[0m'
 DOMAIN="ctrader.emmanuelshekinah.co.za"
 NGINX_CONFIG="/etc/nginx/sites-available/ctrader.emmanuelshekinah.co.za"
 NGINX_ENABLED="/etc/nginx/sites-enabled/ctrader.emmanuelshekinah.co.za"
+NGINX_PORT=5009
+BACKEND_PORT=25345
 
 print_header() {
     echo -e "\n${BLUE}========================================${NC}"
@@ -114,8 +117,8 @@ fi
 # ============================================================================
 print_header "Step 7: Verifying ports"
 
-echo "Port 80:"
-sudo netstat -tlnp 2>/dev/null | grep ":80 " || sudo ss -tlnp 2>/dev/null | grep ":80 " || print_warning "Port 80 not found"
+echo "Port 5009:"
+sudo netstat -tlnp 2>/dev/null | grep ":5009 " || sudo ss -tlnp 2>/dev/null | grep ":5009 " || print_warning "Port 5009 not found"
 
 echo ""
 echo "Port 25345:"
@@ -128,13 +131,13 @@ print_header "Step 8: Testing endpoints"
 
 sleep 3
 
-echo "Testing Port 80 /health:"
-curl -s http://localhost/health 2>&1 | head -c 100
+echo "Testing Port 5009 /health:"
+curl -s http://localhost:5009/health 2>&1 | head -c 100
 echo ""
 echo ""
 
-echo "Testing Port 80 /webhook (POST):"
-curl -s -X POST http://localhost/webhook \
+echo "Testing Port 5009 /webhook (POST):"
+curl -s -X POST http://localhost:5009/webhook \
   -H "Content-Type: application/json" \
   -d '{"symbol":"TEST","action":"BUY","price":"1.0","time":"2026-05-27T10:00:00Z"}' 2>&1 | head -c 100
 echo ""
@@ -158,14 +161,14 @@ echo ""
 print_header "Deployment Complete!"
 
 echo -e "${GREEN}✓ Nginx configured for dual port support${NC}"
-echo -e "${GREEN}✓ Port 80 (via Nginx) ready${NC}"
+echo -e "${GREEN}✓ Port 5009 (via Nginx) ready${NC}"
 echo -e "${GREEN}✓ Port 25345 (direct) ready${NC}"
 echo ""
 echo "Endpoints available on both ports:"
-echo "  GET  http://$DOMAIN/"
-echo "  GET  http://$DOMAIN/health"
-echo "  GET  http://$DOMAIN/signal"
-echo "  POST http://$DOMAIN/webhook"
+echo "  GET  http://$DOMAIN:5009/"
+echo "  GET  http://$DOMAIN:5009/health"
+echo "  GET  http://$DOMAIN:5009/signal"
+echo "  POST http://$DOMAIN:5009/webhook"
 echo ""
 echo "Also available on port 25345 (direct):"
 echo "  GET  http://$DOMAIN:25345/"
@@ -174,10 +177,10 @@ echo "  GET  http://$DOMAIN:25345/signal"
 echo "  POST http://$DOMAIN:25345/webhook"
 echo ""
 echo "Test commands:"
-echo "  curl http://$DOMAIN/health"
-echo "  curl -X POST http://$DOMAIN/webhook -H 'Content-Type: application/json' -d '{\"symbol\":\"XAUUSD\",\"action\":\"SELL\",\"price\":\"3345.12\",\"time\":\"2026-05-27T10:00:00Z\"}'"
+echo "  curl http://$DOMAIN:5009/health"
+echo "  curl -X POST http://$DOMAIN:5009/webhook -H 'Content-Type: application/json' -d '{\"symbol\":\"XAUUSD\",\"action\":\"SELL\",\"price\":\"3345.12\",\"time\":\"2026-05-27T10:00:00Z\"}'"
 echo ""
 echo "cBot Configuration:"
-echo "  Option A: Server=$DOMAIN, Port=80, HTTPS=false"
+echo "  Option A: Server=$DOMAIN, Port=5009, HTTPS=false"
 echo "  Option B: Server=$DOMAIN, Port=25345, HTTPS=false"
 echo ""
