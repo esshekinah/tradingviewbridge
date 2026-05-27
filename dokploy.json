@@ -1,0 +1,78 @@
+{
+  "project": {
+    "name": "TradingView Webhook Bridge",
+    "description": "FastAPI webhook receiver for cTrader alerts"
+  },
+  "application": {
+    "name": "tradingview-webhook",
+    "description": "cTrader webhook bridge - TradingView alert receiver",
+    "type": "docker",
+    "dockerfile": "./Dockerfile",
+    "buildContext": ".",
+    "ports": [
+      {
+        "containerPort": 25345,
+        "publishedPort": 25345,
+        "protocol": "tcp"
+      }
+    ],
+    "environment": {
+      "PYTHONUNBUFFERED": "1",
+      "LOG_LEVEL": "INFO",
+      "ENVIRONMENT": "production"
+    },
+    "restartPolicy": {
+      "name": "unless-stopped",
+      "maxRetryCount": 5
+    },
+    "healthCheck": {
+      "enabled": true,
+      "command": "curl -f http://localhost:25345/health || exit 1",
+      "interval": 30,
+      "timeout": 10,
+      "retries": 3,
+      "startPeriod": 5
+    },
+    "volumes": [
+      {
+        "hostPath": "/var/log/tradingview-webhook",
+        "containerPath": "/app/logs",
+        "readOnly": false
+      }
+    ],
+    "resources": {
+      "limits": {
+        "cpus": 1,
+        "memory": "512M"
+      },
+      "reservations": {
+        "cpus": 0.5,
+        "memory": "256M"
+      }
+    },
+    "logging": {
+      "driver": "json-file",
+      "options": {
+        "max-size": "10m",
+        "max-file": "3"
+      }
+    }
+  },
+  "networking": {
+    "domain": "ctrader.emmanuelshekinah.co.za",
+    "https": true,
+    "reverseProxy": "nginx",
+    "ports": {
+      "http": 80,
+      "https": 443,
+      "internal": 25345
+    }
+  },
+  "deployment": {
+    "strategy": "docker",
+    "autoRestart": true,
+    "healthCheckEnabled": true,
+    "persistentLogs": true,
+    "logPath": "/var/log/tradingview-webhook"
+  }
+}
