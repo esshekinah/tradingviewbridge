@@ -111,15 +111,15 @@ async def health():
 # =========================================================
 @app.get("/")
 async def root():
-    if latest_signal is None:
-        logger.warning("No signal yet requested by client")
-
-        return {
-            "status": "no_signal",
-            "message": "No TradingView signal received yet"
+    return {
+        "service": "TradingView Webhook Bridge",
+        "status": "running",
+        "endpoints": {
+            "POST /webhook": "Send TradingView alerts here",
+            "GET /signal": "Get latest signal",
+            "GET /health": "Health check"
         }
-
-    return latest_signal
+    }
 
 
 # =========================================================
