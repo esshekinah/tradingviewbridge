@@ -84,6 +84,8 @@ async def receive_webhook(request: Request):
 # =========================================================
 @app.get("/signal")
 async def get_signal():
+    global latest_signal
+    
     if latest_signal is None:
         logger.warning("No signal yet requested by client")
 
@@ -92,7 +94,10 @@ async def get_signal():
             "message": "No TradingView signal received yet"
         }
 
-    return latest_signal
+    signal_data = latest_signal
+    latest_signal = None  # Clear signal after retrieval
+    logger.info(f"Signal retrieved and cleared: {signal_data}")
+    return signal_data
 
 
 # =========================================================
