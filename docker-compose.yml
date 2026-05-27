@@ -5,29 +5,40 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+
     container_name: tradingview-webhook-bridge
-    ports:
-      - "25345:25345"
+
+    # ✅ IMPORTANT: do NOT expose publicly
+    expose:
+      - "25345"
+
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=INFO
       - ENVIRONMENT=production
+
     restart: unless-stopped
+
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:25345/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 5s
+
     volumes:
       - tradingview-logs:/app/logs
+
     networks:
       - tradingview-network
+
+    # ⚠️ NOTE: deploy section only works in Docker Swarm
     deploy:
       resources:
         limits:
