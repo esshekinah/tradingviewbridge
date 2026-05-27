@@ -1,10 +1,10 @@
 #!/bin/bash
 
 ################################################################################
-# TradingView Webhook Bridge - Dokploy Deployment with Nginx Fix
+# TradingView Webhook Bridge - Dokploy Deployment with Dual Port Support
 #
-# This script deploys the application to Dokploy and fixes Nginx configuration
-# to properly handle POST requests on port 80
+# This script deploys the application to Dokploy and configures Nginx to
+# properly handle all endpoints on both port 80 and port 25345
 #
 # Usage: sudo bash deploy-with-nginx-fix.sh
 ################################################################################
@@ -22,6 +22,8 @@ NC='\033[0m'
 DOMAIN="ctrader.emmanuelshekinah.co.za"
 APP_DIR="/opt/tradingview-webhook"
 NGINX_CONFIG="/etc/nginx/sites-available/ctrader.emmanuelshekinah.co.za"
+BACKEND_PORT=25345
+FRONTEND_PORT=80
 
 ################################################################################
 # Helper Functions
@@ -114,52 +116,78 @@ deploy_application() {
 ################################################################################
 
 configure_nginx() {
-    print_header "Step 3: Configuring Nginx"
+    print_header "Step 3: Configuring Nginx for Dual Port Support"
     
-    print_info "Creating Nginx configuration..."
+    print_info "Creating Nginx configuration for port 80 and 25345..."
     
     # Create the Nginx config
     cat > $NGINX_CONFIG << 'NGINX_CONFIG_EOF'
+# ============================================================================
+# TradingView Webhook Bridge - Dual Port Configuration
+# Handles all endpoints on port 80 (via Nginx) and port 25345 (direct)
+# ============================================================================
+
 # HTTP server (port 80)
 server {
     listen 80;
     listen [::]:80;
     server_name ctrader.emmanuelshekinah.co.za;
 
+    # Let's Encrypt verification
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
 
-    # Root location - catches ALL requests
+    # ========================================================================
+    # Root location - catches ALL requests (GET, POST, PUT, DELETE)
+    # ========================================================================
     location / {
-        proxy_pass http://localhost:25345;
+        proxy_pass http://127.0.0.1:25345;
         proxy_http_version 1.1;
         
+        # Essential headers for all request types
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $server_name;
+        
+        # CRITICAL: Forward Content-Type for POST requests
         proxy_set_header Content-Type $content_type;
         
+        # Allow all HTTP methods
+        proxy_method $request_method;
+        
+        # Buffering configuration
         proxy_buffering on;
         proxy_buffer_size 4k;
         proxy_buffers 8 4k;
         proxy_busy_buffers_size 8k;
         
+        # Timeouts
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
+        
+        # WebSocket support
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
+
+    # ========================================================================
+    # Explicit endpoint locations for fine-tuning
+    # ========================================================================
 
     # Webhook endpoint (POST)
     location /webhook {
-        proxy_pass http://localhost:25345/webhook;
+        proxy_pass http://127.0.0.1:25345/webhook;
         proxy_http_version 1.1;
         
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $server_name;
         proxy_set_header Content-Type $content_type;
         
         proxy_buffering on;
@@ -170,7 +198,7 @@ server {
 
     # Signal endpoint (GET)
     location /signal {
-        proxy_pass http://localhost:25345/signal;
+        proxy_pass http://127.0.0.1:25345/signal;
         proxy_http_version 1.1;
         
         proxy_set_header Host $host;
@@ -181,15 +209,19 @@ server {
 
     # Health endpoint (GET)
     location /health {
-        proxy_pass http://localhost:25345/health;
+        proxy_pass http://127.0.0.1:25345/health;
         proxy_http_version 1.1;
         
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        
+        access_log off;
     }
 }
 
-# HTTPS server (port 443)
+# ============================================================================
+# HTTPS server (port 443) - if you have SSL certificate
+# ============================================================================
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
@@ -205,15 +237,19 @@ server {
     ssl_session_timeout 10m;
 
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
 
+    # Root location
     location / {
-        proxy_pass http://localhost:25345;
+        proxy_pass http://127.0.0.1:25345;
         proxy_http_version 1.1;
         
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $server_name;
         proxy_set_header Content-Type $content_type;
         
         proxy_buffering on;
@@ -224,16 +260,21 @@ server {
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
+        
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 
+    # Webhook endpoint
     location /webhook {
-        proxy_pass http://localhost:25345/webhook;
+        proxy_pass http://127.0.0.1:25345/webhook;
         proxy_http_version 1.1;
         
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $server_name;
         proxy_set_header Content-Type $content_type;
         
         proxy_buffering on;
@@ -242,8 +283,9 @@ server {
         proxy_busy_buffers_size 8k;
     }
 
+    # Signal endpoint
     location /signal {
-        proxy_pass http://localhost:25345/signal;
+        proxy_pass http://127.0.0.1:25345/signal;
         proxy_http_version 1.1;
         
         proxy_set_header Host $host;
@@ -252,17 +294,26 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Health endpoint
     location /health {
-        proxy_pass http://localhost:25345/health;
+        proxy_pass http://127.0.0.1:25345/health;
         proxy_http_version 1.1;
         
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        
+        access_log off;
     }
 }
+
+# ============================================================================
+# Direct port 25345 access (no Nginx proxy)
+# FastAPI listens directly on 0.0.0.0:25345
+# All endpoints accessible: GET /, GET /health, GET /signal, POST /webhook
+# ============================================================================
 NGINX_CONFIG_EOF
 
-    print_success "Nginx configuration created"
+    print_success "Nginx configuration created for dual port support"
 }
 
 ################################################################################
@@ -347,23 +398,65 @@ verify_deployment() {
 ################################################################################
 
 test_endpoints() {
-    print_header "Step 8: Testing Endpoints"
+    print_header "Step 8: Testing All Endpoints on Both Ports"
     
     print_info "Waiting for backend to be ready..."
     sleep 5
     
-    print_info "Testing health endpoint..."
-    if curl -s http://localhost:25345/health > /dev/null 2>&1; then
-        print_success "Health endpoint responding"
+    # ========================================================================
+    # Test Port 80 (via Nginx)
+    # ========================================================================
+    print_info "Testing Port 80 (via Nginx)..."
+    
+    print_info "  GET /health on port 80..."
+    if curl -s http://localhost/health > /dev/null 2>&1; then
+        print_success "Health endpoint responding on port 80"
     else
-        print_warning "Health endpoint not responding (backend may still be starting)"
+        print_warning "Health endpoint not responding on port 80"
     fi
     
-    print_info "Testing signal endpoint..."
-    if curl -s http://localhost:25345/signal > /dev/null 2>&1; then
-        print_success "Signal endpoint responding"
+    print_info "  GET /signal on port 80..."
+    if curl -s http://localhost/signal > /dev/null 2>&1; then
+        print_success "Signal endpoint responding on port 80"
     else
-        print_warning "Signal endpoint not responding"
+        print_warning "Signal endpoint not responding on port 80"
+    fi
+    
+    print_info "  POST /webhook on port 80..."
+    if curl -s -X POST http://localhost/webhook \
+        -H "Content-Type: application/json" \
+        -d '{"symbol":"TEST","action":"BUY","price":"1.0","time":"2026-05-27T10:00:00Z"}' > /dev/null 2>&1; then
+        print_success "Webhook endpoint responding on port 80"
+    else
+        print_warning "Webhook endpoint not responding on port 80"
+    fi
+    
+    # ========================================================================
+    # Test Port 25345 (Direct)
+    # ========================================================================
+    print_info "Testing Port 25345 (Direct)..."
+    
+    print_info "  GET /health on port 25345..."
+    if curl -s http://localhost:25345/health > /dev/null 2>&1; then
+        print_success "Health endpoint responding on port 25345"
+    else
+        print_warning "Health endpoint not responding on port 25345"
+    fi
+    
+    print_info "  GET /signal on port 25345..."
+    if curl -s http://localhost:25345/signal > /dev/null 2>&1; then
+        print_success "Signal endpoint responding on port 25345"
+    else
+        print_warning "Signal endpoint not responding on port 25345"
+    fi
+    
+    print_info "  POST /webhook on port 25345..."
+    if curl -s -X POST http://localhost:25345/webhook \
+        -H "Content-Type: application/json" \
+        -d '{"symbol":"TEST","action":"SELL","price":"1.0","time":"2026-05-27T10:00:00Z"}' > /dev/null 2>&1; then
+        print_success "Webhook endpoint responding on port 25345"
+    else
+        print_warning "Webhook endpoint not responding on port 25345"
     fi
 }
 
@@ -387,18 +480,30 @@ main() {
     
     print_header "Deployment Complete!"
     
-    echo -e "${GREEN}✓ Nginx configured and running${NC}"
-    echo -e "${GREEN}✓ Ready for application deployment${NC}"
+    echo -e "${GREEN}✓ Nginx configured for dual port support${NC}"
+    echo -e "${GREEN}✓ Port 80 (via Nginx) ready${NC}"
+    echo -e "${GREEN}✓ Port 25345 (direct) ready${NC}"
+    echo -e "${GREEN}✓ All endpoints accessible on both ports${NC}"
     echo ""
-    echo "Next steps:"
-    echo "1. Deploy application via Dokploy dashboard"
-    echo "2. Test endpoints:"
-    echo "   curl http://$DOMAIN/health"
-    echo "   curl -X POST http://$DOMAIN/webhook -H 'Content-Type: application/json' -d '{\"symbol\":\"XAUUSD\",\"action\":\"SELL\",\"price\":\"3345.12\",\"time\":\"2026-05-27T10:00:00Z\"}'"
-    echo "3. Configure cBot with:"
-    echo "   Server: $DOMAIN"
-    echo "   Port: 80"
-    echo "   HTTPS: false"
+    echo "Endpoints available on both ports:"
+    echo "  GET  http://$DOMAIN/              (API info)"
+    echo "  GET  http://$DOMAIN/health        (Health check)"
+    echo "  GET  http://$DOMAIN/signal        (Get latest signal)"
+    echo "  POST http://$DOMAIN/webhook       (Receive alerts)"
+    echo ""
+    echo "Also available on port 25345 (direct):"
+    echo "  GET  http://$DOMAIN:25345/              (API info)"
+    echo "  GET  http://$DOMAIN:25345/health        (Health check)"
+    echo "  GET  http://$DOMAIN:25345/signal        (Get latest signal)"
+    echo "  POST http://$DOMAIN:25345/webhook       (Receive alerts)"
+    echo ""
+    echo "Test commands:"
+    echo "  curl http://$DOMAIN/health"
+    echo "  curl -X POST http://$DOMAIN/webhook -H 'Content-Type: application/json' -d '{\"symbol\":\"XAUUSD\",\"action\":\"SELL\",\"price\":\"3345.12\",\"time\":\"2026-05-27T10:00:00Z\"}'"
+    echo ""
+    echo "cBot Configuration:"
+    echo "  Option A: Server=$DOMAIN, Port=80, HTTPS=false"
+    echo "  Option B: Server=$DOMAIN, Port=25345, HTTPS=false"
     echo ""
 }
 
