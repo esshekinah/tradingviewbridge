@@ -35,6 +35,7 @@ app.add_middleware(
 # MEMORY STORAGE
 # =========================================================
 latest_signal: Optional[Dict[str, Any]] = None
+signal_lock = None  # For thread-safe access
 
 
 # =========================================================
@@ -78,6 +79,7 @@ async def receive_webhook(request: Request):
         }
 
         logger.info(f"STORED SIGNAL: {latest_signal}")
+        logger.info(f"✓ Signal stored and ready for retrieval")
 
         return {
             "status": "success",
@@ -102,16 +104,18 @@ async def get_signal():
     global latest_signal
     
     if latest_signal is None:
-        logger.warning("No signal yet requested by client")
-
+        logger.debug("No signal yet requested by client")
         return {
             "status": "no_signal",
             "message": "No TradingView signal received yet"
         }
 
     signal_data = latest_signal.copy()
-    latest_signal = None  # Clear signal after retrieval
-    logger.info(f"Signal retrieved and cleared: {signal_data}")
+    logger.info(f"✓ Signal retrieved by cBot: {signal_data.get('symbol')} {signal_data.get('action')}")
+    
+    # Only clear after successful retrieval to prevent race conditions
+    latest_signal = None
+    
     return signal_data
 
 

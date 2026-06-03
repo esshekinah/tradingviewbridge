@@ -183,46 +183,54 @@ namespace cAlgo.Robots
         {
             try
             {
-                // Prevent concurrent polling
-                lock (_lockObject)
+                // Build webhook server URL
+                string protocol = UseHttps ? "https" : "http";
+                string url = "http://ctrader.emmanuelshekinah.co.za:25345/signal";//$"{protocol}://{ServerIP}:{ServerPort}/signal";
+
+                // Fetch signal from webhook server
+                WebhookSignal signal = await FetchSignalAsync(url);
+
+                // Check if signal is valid
+                if (signal != null)
                 {
-                    // Build webhook server URL
-                    string protocol = UseHttps ? "https" : "http";
-                    string url = "http://ctrader.emmanuelshekinah.co.za:25345/signal";//$"{protocol}://{ServerIP}:{ServerPort}/signal";
-
-                    // Fetch signal from webhook server
-                    var task = FetchSignalAsync(url);
-                    task.Wait(TimeSpan.FromSeconds(10));
-                    WebhookSignal signal = task.Result;
-
-                    // Check if signal is valid
-                    if (signal != null)
+                    // Check signal status first
+                    if (signal.Status == "success")
                     {
-                        // Check signal status first
-                        if (signal.Status == "success")
+                        // Prevent concurrent polling with lock
+                        lock (_lockObject)
                         {
                             // Only check for duplicates if status is success
                             if (!IsDuplicateSignal(signal))
                             {
-                                Log($"New signal received: {signal.Symbol} {signal.Action} @ {signal.Entry}");
+                                Log($"✓ NEW SIGNAL: {signal.Symbol} {signal.Action} @ {signal.Entry}");
+                                Log($"  Entry: {signal.Entry} | SL: {signal.StopLoss} | TP: {string.Join(",", signal.TakeProfitLevels ?? new List<double>())}");
 
                                 // Update last signal tracking
                                 _lastSignal = signal;
                                 _lastSignalTime = DateTime.UtcNow;
 
-                                // Execute trade based on signal
-                                var executeTask = ExecuteTradeAsync(signal);
-                                executeTask.Wait();
+                                // Execute trade on main thread
+                                BeginInvokeOnMainThread(async () =>
+                                {
+                                    try
+                                    {
+                                        await ExecuteTradeAsync(signal);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Log($"ERROR executing trade: {ex.Message}");
+                                    }
+                                });
                             }
                         }
-                        else if (signal.Status == "no_signal")
-                        {
-                            Log("No signal available yet");
-                        }
-                        else if (signal.Status == "error")
-                        {
-                            Log($"Server error: {signal.Status}");
-                        }
+                    }
+                    else if (signal.Status == "no_signal")
+                    {
+                        // Quietly skip - no signal yet (don't spam logs)
+                    }
+                    else if (signal.Status == "error")
+                    {
+                        Log($"⚠ Server error: {signal.Status}");
                     }
                 }
             }
@@ -257,11 +265,16 @@ namespace cAlgo.Robots
 
                 // Read response content
                 string content = await response.Content.ReadAsStringAsync();
-                Log("Response: "+ content);
+                Log($"✓ HTTP {response.StatusCode} | Response: {content}");
 
                 // Deserialize JSON to WebhookSignal object
                 var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                 WebhookSignal signal = System.Text.Json.JsonSerializer.Deserialize<WebhookSignal>(content, options);
+
+                if (signal != null && signal.Status == "success")
+                {
+                    Log($"✓ SUCCESS RESPONSE PARSED: {signal.Symbol} {signal.Action}");
+                }
 
                 return signal;
             }
