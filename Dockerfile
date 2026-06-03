@@ -41,4 +41,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 # =========================
 # Run both services
 # =========================
-CMD sh -c "python signal_fetcher.py &\npython main.py"
+CMD ["sh", "-c", "python signal_fetcher.py & python main.py"]
