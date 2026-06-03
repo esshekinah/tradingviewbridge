@@ -1,66 +1,66 @@
 {
-  "timestamp": "2026-06-03T11:48:55.295472Z",
+  "timestamp": "2026-06-03T15:00:03.794643Z",
   "total_messages": 10,
   "messages": [
-    {
-      "id": "2169",
-      "text": "XAUUSD Buy 4518   TP  4522 TP  4528 TP  4538 SL  4499",
-      "timestamp": "07:05",
-      "scraped_at": "2026-06-03T11:48:55.010323Z"
-    },
-    {
-      "id": "2170",
-      "text": "XAUUSD Sell 4530TP  4526TP  4520TP  4510SL  4549",
-      "timestamp": "10:03",
-      "scraped_at": "2026-06-03T11:48:55.076515Z"
-    },
-    {
-      "id": "2171",
-      "text": "XAUUSD Sell 4530   TP  4526 TP  4520 TP  4510 SL  4549",
-      "timestamp": "10:25",
-      "scraped_at": "2026-06-03T11:48:55.219128Z"
-    },
-    {
-      "id": "2172",
-      "text": "XAUUSD Sell 4530   TP  4526 TP  4520 TP  4510 SL  4549",
-      "timestamp": "10:26",
-      "scraped_at": "2026-06-03T11:48:55.232697Z"
-    },
-    {
-      "id": "2173",
-      "text": "XAUUSD Sell 4530   TP  4526 TP  4520 TP  4510 SL  4549",
-      "timestamp": "10:26",
-      "scraped_at": "2026-06-03T11:48:55.239683Z"
-    },
-    {
-      "id": "2174",
-      "text": "XAUUSD Sell 4530   TP  4526 TP  4520 TP  4510 SL  4549",
-      "timestamp": "14:01",
-      "scraped_at": "2026-06-03T11:48:55.243083Z"
-    },
     {
       "id": "2175",
       "text": "XAUUSD Sell 4530   TP  4526 TP  4520 TP  4510 SL  4549",
       "timestamp": "14:01",
-      "scraped_at": "2026-06-03T11:48:55.255461Z"
+      "scraped_at": "2026-06-03T15:00:03.786059Z"
     },
     {
       "id": "2176",
       "text": "XAUUSD Sell 4530   TP  4526 TP  4520 TP  4510 SL  4549",
       "timestamp": "14:01",
-      "scraped_at": "2026-06-03T11:48:55.282032Z"
+      "scraped_at": "2026-06-03T15:00:03.787046Z"
     },
     {
       "id": "2177",
       "text": "XAUUSD Sell 4530   TP  4526 TP  4520 TP  4510 SL  4549",
       "timestamp": "14:29",
-      "scraped_at": "2026-06-03T11:48:55.289897Z"
+      "scraped_at": "2026-06-03T15:00:03.787852Z"
     },
     {
       "id": "2179",
       "text": "XAUUSD Sell 4476TP  4472TP  4466TP  4456SL  4495",
       "timestamp": "02:52",
-      "scraped_at": "2026-06-03T11:48:55.291715Z"
+      "scraped_at": "2026-06-03T15:00:03.788653Z"
+    },
+    {
+      "id": "2180",
+      "text": "XAUUSD Sell 4476   TP  4472 TP  4466 TP  4456 SL  4495",
+      "timestamp": "06:03",
+      "scraped_at": "2026-06-03T15:00:03.789326Z"
+    },
+    {
+      "id": "2181",
+      "text": "XAUUSD Sell 4476   TP  4472 TP  4466 TP  4456 SL  4495",
+      "timestamp": "06:03",
+      "scraped_at": "2026-06-03T15:00:03.790068Z"
+    },
+    {
+      "id": "2182",
+      "text": "XAUUSD Sell 4476   TP  4472 TP  4466 TP  4456 SL  4495",
+      "timestamp": "06:05",
+      "scraped_at": "2026-06-03T15:00:03.790762Z"
+    },
+    {
+      "id": "2183",
+      "text": "XAUUSD Sell 4476   TP  4472 TP  4466 TP  4456 SL  4495",
+      "timestamp": "09:54",
+      "scraped_at": "2026-06-03T15:00:03.791562Z"
+    },
+    {
+      "id": "2184",
+      "text": "XAUUSD Sell 4476   TP  4472 TP  4466 TP  4456 SL  4495",
+      "timestamp": "09:54",
+      "scraped_at": "2026-06-03T15:00:03.792343Z"
+    },
+    {
+      "id": "2185",
+      "text": "XAUUSD Sell 4462TP  4458TP  4452TP  4442SL  4481",
+      "timestamp": "10:13",
+      "scraped_at": "2026-06-03T15:00:03.793152Z"
     }
   ],
   "url": "https://t.me/s/txauusd2"

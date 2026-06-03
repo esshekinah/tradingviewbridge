@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
+using System.Text.Json.Serialization;
 
 namespace cAlgo.Robots
 {
@@ -27,7 +27,7 @@ namespace cAlgo.Robots
     /// - Set VOLUME to desired trade volume
     /// - Adjust POLL_INTERVAL_MS if needed
     /// </summary>
-    [Robot(TimeZone = TimeZoneInfo.Utc, AccessRights = AccessRights.None)]
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
     public class TradingViewWebhookBridge : Robot
     {
         // ============================================================================
@@ -38,7 +38,7 @@ namespace cAlgo.Robots
         /// Webhook bridge server IP address or hostname
         /// Example: "192.168.1.100" or "ctrader.emmanuelshekinah.co.za"
         /// </summary>
-        [Parameter("Server IP/Domain", DefaultValue = "ctrader.emmanuelshekinah.co.za", Group = "Server")]
+        [Parameter("Server IP/Domain", DefaultValue = "http://ctrader.emmanuelshekinah.co.za", Group = "Server")]
         public string ServerIP { get; set; }
 
         /// <summary>
@@ -81,6 +81,13 @@ namespace cAlgo.Robots
         /// </summary>
         [Parameter("Take Profit (pips)", DefaultValue = 100, MinValue = 0, Group = "Trading")]
         public int TakeProfitPips { get; set; }
+
+        /// <summary>
+        /// Entry timeout in seconds
+        /// How long to wait for entry price condition before timing out
+        /// </summary>
+        [Parameter("Entry Timeout (seconds)", DefaultValue = 120, MinValue = 10, Step = 10, Group = "Trading")]
+        public int EntryTimeoutSeconds { get; set; }
 
         /// <summary>
         /// Enable logging to cTrader logs
@@ -177,34 +184,46 @@ namespace cAlgo.Robots
             try
             {
                 // Prevent concurrent polling
-                if (!Monitor.TryEnter(_lockObject))
-                    return;
-
-                try
+                lock (_lockObject)
                 {
                     // Build webhook server URL
                     string protocol = UseHttps ? "https" : "http";
-                    string url = $"{protocol}://{ServerIP}:{ServerPort}/signal";
+                    string url = "http://ctrader.emmanuelshekinah.co.za:25345/signal";//$"{protocol}://{ServerIP}:{ServerPort}/signal";
 
                     // Fetch signal from webhook server
-                    WebhookSignal signal = await FetchSignalAsync(url);
+                    var task = FetchSignalAsync(url);
+                    task.Wait(TimeSpan.FromSeconds(10));
+                    WebhookSignal signal = task.Result;
 
-                    // Check if signal is valid and not a duplicate
-                    if (signal != null && !IsDuplicateSignal(signal))
+                    // Check if signal is valid
+                    if (signal != null)
                     {
-                        Log($"New signal received: {signal.Symbol} {signal.Action} @ {signal.Price}");
+                        // Check signal status first
+                        if (signal.Status == "success")
+                        {
+                            // Only check for duplicates if status is success
+                            if (!IsDuplicateSignal(signal))
+                            {
+                                Log($"New signal received: {signal.Symbol} {signal.Action} @ {signal.Entry}");
 
-                        // Update last signal tracking
-                        _lastSignal = signal;
-                        _lastSignalTime = DateTime.UtcNow;
+                                // Update last signal tracking
+                                _lastSignal = signal;
+                                _lastSignalTime = DateTime.UtcNow;
 
-                        // Execute trade based on signal
-                        await ExecuteTradeAsync(signal);
+                                // Execute trade based on signal
+                                var executeTask = ExecuteTradeAsync(signal);
+                                executeTask.Wait();
+                            }
+                        }
+                        else if (signal.Status == "no_signal")
+                        {
+                            Log("No signal available yet");
+                        }
+                        else if (signal.Status == "error")
+                        {
+                            Log($"Server error: {signal.Status}");
+                        }
                     }
-                }
-                finally
-                {
-                    Monitor.Exit(_lockObject);
                 }
             }
             catch (Exception ex)
@@ -238,9 +257,11 @@ namespace cAlgo.Robots
 
                 // Read response content
                 string content = await response.Content.ReadAsStringAsync();
+                Log("Response: "+ content);
 
                 // Deserialize JSON to WebhookSignal object
-                WebhookSignal signal = JsonConvert.DeserializeObject<WebhookSignal>(content);
+                var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                WebhookSignal signal = System.Text.Json.JsonSerializer.Deserialize<WebhookSignal>(content, options);
 
                 return signal;
             }
@@ -249,7 +270,7 @@ namespace cAlgo.Robots
                 Log($"WARNING: HTTP request failed - {ex.Message}");
                 return null;
             }
-            catch (JsonException ex)
+            catch (System.Text.Json.JsonException ex)
             {
                 Log($"WARNING: JSON deserialization failed - {ex.Message}");
                 return null;
@@ -282,16 +303,16 @@ namespace cAlgo.Robots
             if (_lastSignal == null)
                 return false;
 
-            // Check if signal matches last signal
+            // Check if signal matches last signal (comparing symbol, action, and entry price)
             bool isSameSymbol = signal.Symbol == _lastSignal.Symbol;
             bool isSameAction = signal.Action == _lastSignal.Action;
-            bool isSamePrice = signal.Price == _lastSignal.Price;
+            bool isSameEntry = Math.Abs(signal.Entry - _lastSignal.Entry) < 0.01; // Allow small difference
 
             // If all properties match, it's a duplicate
-            if (isSameSymbol && isSameAction && isSamePrice)
+            if (isSameSymbol && isSameAction && isSameEntry)
             {
                 // Log duplicate detection
-                Log($"Duplicate signal ignored: {signal.Symbol} {signal.Action}");
+                Log($"Duplicate signal ignored: {signal.Symbol} {signal.Action} @ {signal.Entry}");
                 return true;
             }
 
@@ -304,21 +325,27 @@ namespace cAlgo.Robots
 
         /// <summary>
         /// Executes trade based on received signal
+        /// Watches price and enters when price is at entry or between SL and entry
+        /// Uses signal's SL and TP3 (third TP level)
         /// </summary>
         /// <param name="signal">WebhookSignal containing trade details</param>
         private async Task ExecuteTradeAsync(WebhookSignal signal)
         {
             try
             {
+                Log(signal.Action);
+                Log(signal.Symbol);
+
                 // Validate signal
-                if (string.IsNullOrEmpty(signal.Symbol) || string.IsNullOrEmpty(signal.Action))
+                if (string.IsNullOrEmpty(signal.Action))
                 {
-                    Log("ERROR: Invalid signal - missing symbol or action");
+                    Log("ERROR: Invalid signal - missing symbol or action: ");
+                    //Log(signal);
                     return;
                 }
 
                 // Get symbol from cTrader
-                Symbol symbol = Symbols.GetSymbolOmitError(signal.Symbol);
+                Symbol symbol = Symbols.GetSymbol(signal.Symbol);
                 if (symbol == null)
                 {
                     Log($"ERROR: Symbol not found - {signal.Symbol}");
@@ -328,40 +355,109 @@ namespace cAlgo.Robots
                 // Determine trade direction
                 TradeType tradeType = signal.Action.ToUpper() == "BUY" ? TradeType.Buy : TradeType.Sell;
 
-                // Calculate stop loss and take profit
-                double? stopLoss = null;
-                double? takeProfit = null;
+                Log($"Waiting for entry price condition...");
+                Log($"Signal Entry: {signal.Entry}, SL: {signal.StopLoss}");
 
-                if (StopLossPips > 0)
+                // Watch price and wait for entry condition
+                bool entryConditionMet = false;
+                int checkCount = 0;
+                int maxChecks = EntryTimeoutSeconds; // 1 check per second
+
+                while (checkCount < maxChecks && !entryConditionMet)
                 {
-                    stopLoss = tradeType == TradeType.Buy
-                        ? symbol.Bid - (StopLossPips * symbol.PipSize)
-                        : symbol.Ask + (StopLossPips * symbol.PipSize);
+                    double currentPrice = tradeType == TradeType.Buy ? symbol.Ask : symbol.Bid;
+
+                    // Check entry conditions based on trade direction
+                    if (tradeType == TradeType.Buy)
+                    {
+                        // BUY: Enter if current price is at entry or between SL and entry
+                        // (since entry is typically above SL for BUY)
+                        if (currentPrice >= signal.StopLoss && currentPrice <= signal.Entry)
+                        {
+                            entryConditionMet = true;
+                            Log($"✓ Entry condition met for BUY at {currentPrice}");
+                        }
+                    }
+                    else // SELL
+                    {
+                        // SELL: Enter if current price is at entry or between entry and SL
+                        // (since SL is typically above entry for SELL)
+                        if (currentPrice >= signal.Entry && currentPrice <= signal.StopLoss)
+                        {
+                            entryConditionMet = true;
+                            Log($"✓ Entry condition met for SELL at {currentPrice}");
+                        }
+                    }
+
+                    if (!entryConditionMet)
+                    {
+                        checkCount++;
+                        await Task.Delay(1000); // Wait 1 second before next check
+                    }
                 }
 
-                if (TakeProfitPips > 0)
+                // If entry condition met, execute trade
+                if (entryConditionMet)
                 {
-                    takeProfit = tradeType == TradeType.Buy
-                        ? symbol.Bid + (TakeProfitPips * symbol.PipSize)
-                        : symbol.Ask - (TakeProfitPips * symbol.PipSize);
-                }
+                    double? stopLoss = null;
+                    double? takeProfit = null;
 
-                // Execute trade
-                TradeResult result = ExecuteMarketOrder(tradeType, symbol, Volume, "WebhookBridge", stopLoss, takeProfit);
+                    // Use SL from signal if available, otherwise use fallback from parameters
+                    if (signal.StopLoss > 0)
+                    {
+                        stopLoss = signal.StopLoss;
+                        Log($"Using SL from signal: {stopLoss}");
+                    }
+                    else if (StopLossPips > 0)
+                    {
+                        stopLoss = tradeType == TradeType.Buy
+                            ? symbol.Bid - (StopLossPips * symbol.PipSize)
+                            : symbol.Ask + (StopLossPips * symbol.PipSize);
+                        Log($"Using fallback SL from parameters: {stopLoss} ({StopLossPips} pips)");
+                    }
 
-                // Log trade result
-                if (result.IsSuccessful)
-                {
-                    Log($"✓ Trade executed: {tradeType} {Volume} {symbol.Name} @ {symbol.Bid}");
-                    Log($"  Signal: {signal.Symbol} {signal.Action} @ {signal.Price}");
-                    if (stopLoss.HasValue)
+                    // Use TP from signal if available, otherwise use fallback from parameters
+                    if (signal.TakeProfitLevels != null && signal.TakeProfitLevels.Count >= 3)
+                    {
+                        // Use TP3 (third TP level)
+                        takeProfit = signal.TakeProfitLevels[2];
+                        Log($"Using TP3 from signal: {takeProfit}");
+                    }
+                    else if (signal.TakeProfitLevels != null && signal.TakeProfitLevels.Count > 0)
+                    {
+                        // If TP3 not available, use last available TP from signal
+                        takeProfit = signal.TakeProfitLevels[signal.TakeProfitLevels.Count - 1];
+                        Log($"Using last TP from signal: {takeProfit}");
+                    }
+                    else if (TakeProfitPips > 0)
+                    {
+                        // Fallback to TP from parameters
+                        takeProfit = tradeType == TradeType.Buy
+                            ? symbol.Bid + (TakeProfitPips * symbol.PipSize)
+                            : symbol.Ask - (TakeProfitPips * symbol.PipSize);
+                        Log($"Using fallback TP from parameters: {takeProfit} ({TakeProfitPips} pips)");
+                    }
+
+                    // Execute market order
+                    TradeResult result = ExecuteMarketOrder(tradeType, symbol, Volume, "WebhookBridge", stopLoss, takeProfit);
+
+                    // Log trade result
+                    if (result.IsSuccessful)
+                    {
+                        Log($"✓ Trade executed: {tradeType} {Volume} {symbol.Name} @ {(tradeType == TradeType.Buy ? symbol.Ask : symbol.Bid)}");
+                        Log($"  Signal Entry: {signal.Entry}");
                         Log($"  Stop Loss: {stopLoss}");
-                    if (takeProfit.HasValue)
                         Log($"  Take Profit: {takeProfit}");
+                        Log($"  Position ID: {result.Position.Id}");
+                    }
+                    else
+                    {
+                        Log($"✗ Trade failed: {result.Error}");
+                    }
                 }
                 else
                 {
-                    Log($"✗ Trade failed: {result.Error}");
+                    Log($"⚠ Entry condition not met within {EntryTimeoutSeconds} seconds timeout period");
                 }
             }
             catch (Exception ex)
@@ -439,31 +535,55 @@ namespace cAlgo.Robots
         /// <summary>
         /// Trading symbol (e.g., "XAUUSD", "EURUSD")
         /// </summary>
-        [JsonProperty("symbol")]
+        [JsonPropertyName("symbol")]
         public string Symbol { get; set; }
 
         /// <summary>
         /// Trade action: "BUY" or "SELL"
         /// </summary>
-        [JsonProperty("action")]
+        [JsonPropertyName("action")]
         public string Action { get; set; }
 
         /// <summary>
-        /// Entry price as string
+        /// Signal status: "success", "no_signal", "error"
         /// </summary>
-        [JsonProperty("price")]
+        [JsonPropertyName("status")]
+        public string Status { get; set; }
+
+        /// <summary>
+        /// Entry price from signal
+        /// </summary>
+        [JsonPropertyName("entry")]
+        public double Entry { get; set; }
+
+        /// <summary>
+        /// Stop loss price from signal
+        /// </summary>
+        [JsonPropertyName("sl")]
+        public double StopLoss { get; set; }
+
+        /// <summary>
+        /// Take profit levels from signal
+        /// </summary>
+        [JsonPropertyName("tp_levels")]
+        public List<double> TakeProfitLevels { get; set; }
+
+        /// <summary>
+        /// Entry price as string (for compatibility)
+        /// </summary>
+        [JsonPropertyName("price")]
         public string Price { get; set; }
 
         /// <summary>
         /// Signal timestamp from TradingView
         /// </summary>
-        [JsonProperty("time")]
+        [JsonPropertyName("time")]
         public string Time { get; set; }
 
         /// <summary>
         /// Server reception timestamp
         /// </summary>
-        [JsonProperty("received_at")]
+        [JsonPropertyName("received_at")]
         public string ReceivedAt { get; set; }
 
         /// <summary>
@@ -471,7 +591,7 @@ namespace cAlgo.Robots
         /// </summary>
         public override string ToString()
         {
-            return $"Signal(Symbol={Symbol}, Action={Action}, Price={Price}, Time={Time})";
+            return $"Signal(Symbol={Symbol}, Action={Action}, Entry={Entry}, SL={StopLoss}, TP={string.Join(",", TakeProfitLevels ?? new List<double>())})";
         }
     }
 }

@@ -60,9 +60,13 @@ async def receive_webhook(request: Request):
 
         if not symbol or not action:
             logger.warning("Invalid webhook: missing symbol/action")
-            return {"status": "ignored", "reason": "missing fields"}
+            return {
+                "status": "error",
+                "message": "Missing required fields: symbol/action"
+            }
 
         latest_signal = {
+            "status": "success",
             "symbol": symbol,
             "action": action,
             "entry": entry,
@@ -77,12 +81,17 @@ async def receive_webhook(request: Request):
 
         return {
             "status": "success",
-            "message": "signal stored"
+            "message": "signal stored",
+            "symbol": symbol,
+            "action": action
         }
 
     except Exception as e:
         logger.error(f"Webhook error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "status": "error",
+            "message": f"Error processing alert: {str(e)}"
+        }
 
 
 # =========================================================
@@ -100,7 +109,7 @@ async def get_signal():
             "message": "No TradingView signal received yet"
         }
 
-    signal_data = latest_signal
+    signal_data = latest_signal.copy()
     latest_signal = None  # Clear signal after retrieval
     logger.info(f"Signal retrieved and cleared: {signal_data}")
     return signal_data
