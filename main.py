@@ -52,6 +52,9 @@ async def receive_webhook(request: Request):
         # Validate required fields safely (NO Pydantic blocking)
         symbol = body.get("symbol")
         action = body.get("action")
+        entry = body.get("entry")
+        sl = body.get("sl")
+        tp_levels = body.get("tp_levels", [])
         price = body.get("price")
         time = body.get("time")
 
@@ -62,6 +65,9 @@ async def receive_webhook(request: Request):
         latest_signal = {
             "symbol": symbol,
             "action": action,
+            "entry": entry,
+            "sl": sl,
+            "tp_levels": tp_levels,
             "price": price,
             "time": time,
             "received_at": datetime.utcnow().isoformat() + "Z"

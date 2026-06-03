@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # App source
 # =========================
 COPY main.py .
+COPY signal_fetcher.py .
 
 # =========================
 # Runtime config
@@ -38,6 +39,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:25345/health || exit 1
 
 # =========================
-# Run app
+# Run both services
 # =========================
-CMD ["python", "main.py"]
+CMD sh -c "python signal_fetcher.py &\npython main.py"
