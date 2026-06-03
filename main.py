@@ -114,7 +114,7 @@ async def get_signal():
     logger.info(f"✓ Signal retrieved by cBot: {signal_data.get('symbol')} {signal_data.get('action')}")
     
     # Only clear after successful retrieval to prevent race conditions
-    latest_signal = None
+    #latest_signal = None
     
     return signal_data
 
