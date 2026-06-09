@@ -56,6 +56,13 @@ namespace cAlgo.Robots
         public bool UseHttps { get; set; }
 
         /// <summary>
+        /// Signal stream key used as the id query parameter.
+        /// Example: ctrader_1, other_broker, forex_pro.
+        /// </summary>
+        [Parameter("Key", DefaultValue = "ctrader_1", Group = "Server")]
+        public string Key { get; set; }
+
+        /// <summary>
         /// Polling interval in milliseconds
         /// Default: 5000 (5 seconds)
         /// </summary>
@@ -69,25 +76,25 @@ namespace cAlgo.Robots
         public double Volume { get; set; }
 
         /// <summary>
-        /// Stop loss in net USD dollars
-        /// Position closes when loss reaches this amount
+        /// Take profit level to use from the signal's tp_levels array.
+        /// 1 = TP1, 2 = TP2, 3 = TP3.
         /// </summary>
-        [Parameter("Stop Loss (USD)", DefaultValue = 100, MinValue = 0, Step = 10, Group = "Trading")]
-        public double StopLossUSD { get; set; }
+        [Parameter("TP Level (1-3)", DefaultValue = 3, MinValue = 1, MaxValue = 3, Step = 1, Group = "Trading")]
+        public int TakeProfitLevel { get; set; }
 
         /// <summary>
-        /// Take profit in net USD dollars
-        /// Position closes when profit reaches this amount
+        /// Entry timeout in seconds
+        /// How long to wait for entry price condition before timing out
         /// </summary>
-        [Parameter("Take Profit (USD)", DefaultValue = 200, MinValue = 0, Step = 10, Group = "Trading")]
-        public double TakeProfitUSD { get; set; }
+        [Parameter("Entry Timeout (seconds)", DefaultValue = 120, MinValue = 10, Step = 10, Group = "Trading")]
+        public int EntryTimeoutSeconds { get; set; }
 
         /// <summary>
-        /// Unique broker/client identifier
-        /// Used to track which brokers have fetched each signal
+        /// Minimum allowed account equity before all positions are force closed.
+        /// Set to 0 to disable.
         /// </summary>
-        [Parameter("Broker ID", DefaultValue = "ctrader_1", Group = "Server")]
-        public string BrokerId { get; set; }
+        [Parameter("Daily Equity Limit", DefaultValue = 0, MinValue = 0, Step = 100, Group = "Prop Firm Protection")]
+        public double DailyEquityLimit { get; set; }
 
         /// <summary>
         /// Enable logging to cTrader logs
@@ -125,9 +132,9 @@ namespace cAlgo.Robots
         private readonly object _lockObject = new object();
 
         /// <summary>
-        /// Flag to track if robot is running
+        /// Tracks whether the daily equity protection has already been triggered.
         /// </summary>
-        private bool _isRunning = false;
+        private bool _dailyEquityLimitTriggered = false;
 
         // ============================================================================
         // INITIALIZATION
@@ -161,7 +168,6 @@ namespace cAlgo.Robots
                 _pollTimer.AutoReset = true;
                 _pollTimer.Start();
 
-                _isRunning = true;
                 Log("Robot initialized successfully");
             }
             catch (Exception ex)
@@ -185,7 +191,12 @@ namespace cAlgo.Robots
             {
                 // Build webhook server URL
                 string protocol = UseHttps ? "https" : "http";
-                string url = "http://ctrader.emmanuelshekinah.co.za:25345/signal";//$"{protocol}://{ServerIP}:{ServerPort}/signal";
+                string server = ServerIP
+                    .Replace("http://", string.Empty)
+                    .Replace("https://", string.Empty)
+                    .TrimEnd('/');
+                string encodedKey = Uri.EscapeDataString(Key ?? string.Empty);
+                string url = $"{protocol}://{server}:{ServerPort}/signal?id={encodedKey}";
 
                 // Fetch signal from webhook server
                 WebhookSignal signal = await FetchSignalAsync(url);
@@ -253,11 +264,8 @@ namespace cAlgo.Robots
         {
             try
             {
-                // Append broker ID to URL
-                string urlWithId = $"{url}?id={BrokerId}";
-                
                 // Send GET request to webhook server
-                HttpResponseMessage response = await _httpClient.GetAsync(urlWithId);
+                HttpResponseMessage response = await _httpClient.GetAsync(url);
 
                 // Check if request was successful
                 if (!response.IsSuccessStatusCode)
@@ -277,10 +285,6 @@ namespace cAlgo.Robots
                 if (signal != null && signal.Status == "success")
                 {
                     Log($"✓ SUCCESS RESPONSE PARSED: {signal.Symbol} {signal.Action}");
-                }
-                else if (signal != null && signal.Status == "already_fetched")
-                {
-                    Log($"ℹ Already fetched this signal (other brokers: {signal.FetchedBy})");
                 }
 
                 return signal;
@@ -346,7 +350,7 @@ namespace cAlgo.Robots
         /// <summary>
         /// Executes trade based on received signal
         /// Watches price and enters when price is at entry or between SL and entry
-        /// Uses signal's SL and TP3 (third TP level)
+        /// Uses signal's SL and the configured TP level from the signal.
         /// </summary>
         /// <param name="signal">WebhookSignal containing trade details</param>
         private async Task ExecuteTradeAsync(WebhookSignal signal)
@@ -359,21 +363,32 @@ namespace cAlgo.Robots
                 // Validate signal
                 if (string.IsNullOrEmpty(signal.Action))
                 {
-                    Log("ERROR: Invalid signal - missing symbol or action: ");
+                    Log("ERROR: Invalid signal - missing action");
                     //Log(signal);
                     return;
                 }
 
-                // Get symbol from cTrader
-                Symbol symbol = Symbols.GetSymbol(signal.Symbol);
-                if (symbol == null)
-                {
-                    Log($"ERROR: Symbol not found - {signal.Symbol}");
-                    return;
-                }
+                // Use the symbol this cBot is attached to.
+                Symbol symbol = Symbol;
 
                 // Determine trade direction
                 TradeType tradeType = signal.Action.ToUpper() == "BUY" ? TradeType.Buy : TradeType.Sell;
+                double? takeProfit = GetSelectedTakeProfit(signal);
+
+                if (IsDailyEquityLimitBreached())
+                    return;
+
+                if (signal.StopLoss <= 0)
+                {
+                    Log("ERROR: Invalid signal - missing stop loss");
+                    return;
+                }
+
+                if (!takeProfit.HasValue)
+                {
+                    Log($"ERROR: Invalid signal - TP{TakeProfitLevel} missing from tp_levels");
+                    return;
+                }
 
                 Log($"Waiting for entry price condition...");
                 Log($"Signal Entry: {signal.Entry}");
@@ -418,21 +433,25 @@ namespace cAlgo.Robots
                 if (entryConditionMet)
                 {
                     double currentPrice = tradeType == TradeType.Buy ? symbol.Ask : symbol.Bid;
+                    Log($"✓ Opening position with endpoint SL/TP");
+                    if (IsDailyEquityLimitBreached())
+                        return;
 
-                    Log($"✓ Opening position without SL/TP");
                     Log($"  Entry Price: {currentPrice}");
-                    Log($"  SL Target: ${StopLossUSD} loss");
-                    Log($"  TP Target: ${TakeProfitUSD} profit");
+                    Log($"  SL: {signal.StopLoss}");
+                    Log($"  TP{TakeProfitLevel}: {takeProfit.Value}");
 
-                    // Execute market order WITHOUT SL/TP (we'll monitor manually)
-                    TradeResult result = ExecuteMarketOrder(tradeType, symbol, Volume, "WebhookBridge");
+                    // Execute market order, then attach price-based SL/TP from the webhook signal.
+                    TradeResult result = ExecuteMarketOrder(tradeType, SymbolName, Volume, "WebhookBridge");
 
                     // Log trade result
                     if (result.IsSuccessful)
                     {
+                        ModifyPosition(result.Position, signal.StopLoss, takeProfit.Value, ProtectionType.Absolute);
                         Log($"✓ POSITION OPENED");
                         Log($"  Type: {tradeType} | Volume: {Volume} | Symbol: {symbol.Name}");
                         Log($"  Entry Price: {currentPrice}");
+                        Log($"  SL: {signal.StopLoss} | TP: {takeProfit.Value}");
                         Log($"  Position ID: {result.Position.Id}");
                     }
                     else
@@ -449,6 +468,22 @@ namespace cAlgo.Robots
             {
                 Log($"ERROR in ExecuteTradeAsync: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Returns the configured take profit level from the signal.
+        /// </summary>
+        private double? GetSelectedTakeProfit(WebhookSignal signal)
+        {
+            if (signal.TakeProfitLevels == null)
+                return null;
+
+            int index = TakeProfitLevel - 1;
+            if (index < 0 || index >= signal.TakeProfitLevels.Count)
+                return null;
+
+            double takeProfit = signal.TakeProfitLevels[index];
+            return takeProfit > 0 ? takeProfit : (double?)null;
         }
 
         // ============================================================================
@@ -471,62 +506,57 @@ namespace cAlgo.Robots
             Print(logMessage);
         }
 
-        // ============================================================================
-        // CLEANUP
-        // ============================================================================
+        /// <summary>
+        /// Checks whether account equity has reached the configured prop firm protection level.
+        /// </summary>
+        private bool IsDailyEquityLimitBreached()
+        {
+            if (DailyEquityLimit <= 0)
+                return false;
+
+            if (Account.Equity > DailyEquityLimit)
+                return false;
+
+            if (!_dailyEquityLimitTriggered)
+            {
+                _dailyEquityLimitTriggered = true;
+                Log($"DAILY EQUITY LIMIT TRIGGERED: Equity {Account.Equity:F2} <= Limit {DailyEquityLimit:F2}");
+            }
+
+            ForceCloseAllPositions();
+            return true;
+        }
 
         /// <summary>
-        /// Called on every tick - monitors positions for SL/TP in net USD
+        /// Called on every tick to enforce account-level equity protection.
         /// </summary>
         protected override void OnTick()
         {
-            try
-            {
-                // Get all open positions from the webhook bridge
-                var positions = Positions.FindAll("WebhookBridge");
-
-                if (positions == null || positions.Length == 0)
-                    return;
-
-                foreach (var position in positions)
-                {
-                    // Calculate net P&L in USD
-                    double netPnL = position.NetProfit;
-
-                    // Check if SL is triggered (loss >= target loss)
-                    if (StopLossUSD > 0 && netPnL <= -StopLossUSD)
-                    {
-                        Log($"🛑 SL TRIGGERED on Position {position.Id}: Loss ${Math.Abs(netPnL):F2}");
-                        ClosePosition(position);
-                    }
-                    // Check if TP is triggered (profit >= target profit)
-                    else if (TakeProfitUSD > 0 && netPnL >= TakeProfitUSD)
-                    {
-                        Log($"✓ TP TRIGGERED on Position {position.Id}: Profit ${netPnL:F2}");
-                        ClosePosition(position);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"ERROR in OnTick: {ex.Message}");
-            }
+            IsDailyEquityLimitBreached();
         }
 
         /// <summary>
-        /// Closes a position
+        /// Closes every open position on the account.
         /// </summary>
-        private void ClosePosition(Position position)
+        private void ForceCloseAllPositions()
         {
-            try
+            var positionsToClose = new List<Position>();
+            foreach (var position in Positions)
+                positionsToClose.Add(position);
+
+            foreach (var position in positionsToClose)
             {
-                ClosePositionAsync(position);
-            }
-            catch (Exception ex)
-            {
-                Log($"ERROR closing position {position.Id}: {ex.Message}");
+                TradeResult result = ClosePosition(position);
+                if (result.IsSuccessful)
+                    Log($"Force closed position {position.Id} ({position.SymbolName})");
+                else
+                    Log($"ERROR force closing position {position.Id} ({position.SymbolName}): {result.Error}");
             }
         }
+
+        // ============================================================================
+        // CLEANUP
+        // ============================================================================
 
         /// <summary>
         /// Called when the robot stops
@@ -536,8 +566,6 @@ namespace cAlgo.Robots
         {
             try
             {
-                _isRunning = false;
-
                 // Stop polling timer
                 if (_pollTimer != null)
                 {
@@ -623,12 +651,6 @@ namespace cAlgo.Robots
         /// </summary>
         [JsonPropertyName("received_at")]
         public string ReceivedAt { get; set; }
-
-        /// <summary>
-        /// List of brokers that have already fetched this signal
-        /// </summary>
-        [JsonPropertyName("fetched_by")]
-        public List<string> FetchedBy { get; set; }
 
         /// <summary>
         /// Override ToString for logging
