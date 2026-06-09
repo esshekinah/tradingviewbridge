@@ -69,25 +69,25 @@ namespace cAlgo.Robots
         public double Volume { get; set; }
 
         /// <summary>
-        /// Stop loss in pips
-        /// Set to 0 to disable
+        /// Stop loss in net USD dollars
+        /// Position closes when loss reaches this amount
         /// </summary>
-        [Parameter("Stop Loss (pips)", DefaultValue = 50, MinValue = 0, Group = "Trading")]
-        public int StopLossPips { get; set; }
+        [Parameter("Stop Loss (USD)", DefaultValue = 100, MinValue = 0, Step = 10, Group = "Trading")]
+        public double StopLossUSD { get; set; }
 
         /// <summary>
-        /// Take profit in pips
-        /// Set to 0 to disable
+        /// Take profit in net USD dollars
+        /// Position closes when profit reaches this amount
         /// </summary>
-        [Parameter("Take Profit (pips)", DefaultValue = 100, MinValue = 0, Group = "Trading")]
-        public int TakeProfitPips { get; set; }
+        [Parameter("Take Profit (USD)", DefaultValue = 200, MinValue = 0, Step = 10, Group = "Trading")]
+        public double TakeProfitUSD { get; set; }
 
         /// <summary>
-        /// Entry timeout in seconds
-        /// How long to wait for entry price condition before timing out
+        /// Unique broker/client identifier
+        /// Used to track which brokers have fetched each signal
         /// </summary>
-        [Parameter("Entry Timeout (seconds)", DefaultValue = 120, MinValue = 10, Step = 10, Group = "Trading")]
-        public int EntryTimeoutSeconds { get; set; }
+        [Parameter("Broker ID", DefaultValue = "ctrader_1", Group = "Server")]
+        public string BrokerId { get; set; }
 
         /// <summary>
         /// Enable logging to cTrader logs
@@ -253,8 +253,11 @@ namespace cAlgo.Robots
         {
             try
             {
+                // Append broker ID to URL
+                string urlWithId = $"{url}?id={BrokerId}";
+                
                 // Send GET request to webhook server
-                HttpResponseMessage response = await _httpClient.GetAsync(url);
+                HttpResponseMessage response = await _httpClient.GetAsync(urlWithId);
 
                 // Check if request was successful
                 if (!response.IsSuccessStatusCode)
@@ -274,6 +277,10 @@ namespace cAlgo.Robots
                 if (signal != null && signal.Status == "success")
                 {
                     Log($"✓ SUCCESS RESPONSE PARSED: {signal.Symbol} {signal.Action}");
+                }
+                else if (signal != null && signal.Status == "already_fetched")
+                {
+                    Log($"ℹ Already fetched this signal (other brokers: {signal.FetchedBy})");
                 }
 
                 return signal;
@@ -326,7 +333,7 @@ namespace cAlgo.Robots
             {
                 // Log duplicate detection
                 Log($"Duplicate signal ignored: {signal.Symbol} {signal.Action} @ {signal.Entry}");
-                return true;
+                //return true;
             }
 
             return false;
@@ -369,7 +376,7 @@ namespace cAlgo.Robots
                 TradeType tradeType = signal.Action.ToUpper() == "BUY" ? TradeType.Buy : TradeType.Sell;
 
                 Log($"Waiting for entry price condition...");
-                Log($"Signal Entry: {signal.Entry}, SL: {signal.StopLoss}");
+                Log($"Signal Entry: {signal.Entry}");
 
                 // Watch price and wait for entry condition
                 bool entryConditionMet = false;
@@ -383,9 +390,8 @@ namespace cAlgo.Robots
                     // Check entry conditions based on trade direction
                     if (tradeType == TradeType.Buy)
                     {
-                        // BUY: Enter if current price is at entry or between SL and entry
-                        // (since entry is typically above SL for BUY)
-                        if (currentPrice >= signal.StopLoss && currentPrice <= signal.Entry)
+                        // BUY: Enter when price <= entry price
+                        if (currentPrice <= signal.Entry)
                         {
                             entryConditionMet = true;
                             Log($"✓ Entry condition met for BUY at {currentPrice}");
@@ -393,9 +399,8 @@ namespace cAlgo.Robots
                     }
                     else // SELL
                     {
-                        // SELL: Enter if current price is at entry or between entry and SL
-                        // (since SL is typically above entry for SELL)
-                        if (currentPrice >= signal.Entry && currentPrice <= signal.StopLoss)
+                        // SELL: Enter when price >= entry price
+                        if (currentPrice >= signal.Entry)
                         {
                             entryConditionMet = true;
                             Log($"✓ Entry condition met for SELL at {currentPrice}");
@@ -412,60 +417,27 @@ namespace cAlgo.Robots
                 // If entry condition met, execute trade
                 if (entryConditionMet)
                 {
-                    double? stopLoss = null;
-                    double? takeProfit = null;
+                    double currentPrice = tradeType == TradeType.Buy ? symbol.Ask : symbol.Bid;
 
-                    // Use SL from signal if available, otherwise use fallback from parameters
-                    if (signal.StopLoss > 0)
-                    {
-                        stopLoss = signal.StopLoss;
-                        Log($"Using SL from signal: {stopLoss}");
-                    }
-                    else if (StopLossPips > 0)
-                    {
-                        stopLoss = tradeType == TradeType.Buy
-                            ? symbol.Bid - (StopLossPips * symbol.PipSize)
-                            : symbol.Ask + (StopLossPips * symbol.PipSize);
-                        Log($"Using fallback SL from parameters: {stopLoss} ({StopLossPips} pips)");
-                    }
+                    Log($"✓ Opening position without SL/TP");
+                    Log($"  Entry Price: {currentPrice}");
+                    Log($"  SL Target: ${StopLossUSD} loss");
+                    Log($"  TP Target: ${TakeProfitUSD} profit");
 
-                    // Use TP from signal if available, otherwise use fallback from parameters
-                    if (signal.TakeProfitLevels != null && signal.TakeProfitLevels.Count >= 3)
-                    {
-                        // Use TP3 (third TP level)
-                        takeProfit = signal.TakeProfitLevels[2];
-                        Log($"Using TP3 from signal: {takeProfit}");
-                    }
-                    else if (signal.TakeProfitLevels != null && signal.TakeProfitLevels.Count > 0)
-                    {
-                        // If TP3 not available, use last available TP from signal
-                        takeProfit = signal.TakeProfitLevels[signal.TakeProfitLevels.Count - 1];
-                        Log($"Using last TP from signal: {takeProfit}");
-                    }
-                    else if (TakeProfitPips > 0)
-                    {
-                        // Fallback to TP from parameters
-                        takeProfit = tradeType == TradeType.Buy
-                            ? symbol.Bid + (TakeProfitPips * symbol.PipSize)
-                            : symbol.Ask - (TakeProfitPips * symbol.PipSize);
-                        Log($"Using fallback TP from parameters: {takeProfit} ({TakeProfitPips} pips)");
-                    }
-
-                    // Execute market order
-                    TradeResult result = ExecuteMarketOrder(tradeType, symbol, Volume, "WebhookBridge", stopLoss, takeProfit);
+                    // Execute market order WITHOUT SL/TP (we'll monitor manually)
+                    TradeResult result = ExecuteMarketOrder(tradeType, symbol, Volume, "WebhookBridge");
 
                     // Log trade result
                     if (result.IsSuccessful)
                     {
-                        Log($"✓ Trade executed: {tradeType} {Volume} {symbol.Name} @ {(tradeType == TradeType.Buy ? symbol.Ask : symbol.Bid)}");
-                        Log($"  Signal Entry: {signal.Entry}");
-                        Log($"  Stop Loss: {stopLoss}");
-                        Log($"  Take Profit: {takeProfit}");
+                        Log($"✓ POSITION OPENED");
+                        Log($"  Type: {tradeType} | Volume: {Volume} | Symbol: {symbol.Name}");
+                        Log($"  Entry Price: {currentPrice}");
                         Log($"  Position ID: {result.Position.Id}");
                     }
                     else
                     {
-                        Log($"✗ Trade failed: {result.Error}");
+                        Log($"✗ POSITION OPEN FAILED: {result.Error}");
                     }
                 }
                 else
@@ -502,6 +474,59 @@ namespace cAlgo.Robots
         // ============================================================================
         // CLEANUP
         // ============================================================================
+
+        /// <summary>
+        /// Called on every tick - monitors positions for SL/TP in net USD
+        /// </summary>
+        protected override void OnTick()
+        {
+            try
+            {
+                // Get all open positions from the webhook bridge
+                var positions = Positions.FindAll("WebhookBridge");
+
+                if (positions == null || positions.Length == 0)
+                    return;
+
+                foreach (var position in positions)
+                {
+                    // Calculate net P&L in USD
+                    double netPnL = position.NetProfit;
+
+                    // Check if SL is triggered (loss >= target loss)
+                    if (StopLossUSD > 0 && netPnL <= -StopLossUSD)
+                    {
+                        Log($"🛑 SL TRIGGERED on Position {position.Id}: Loss ${Math.Abs(netPnL):F2}");
+                        ClosePosition(position);
+                    }
+                    // Check if TP is triggered (profit >= target profit)
+                    else if (TakeProfitUSD > 0 && netPnL >= TakeProfitUSD)
+                    {
+                        Log($"✓ TP TRIGGERED on Position {position.Id}: Profit ${netPnL:F2}");
+                        ClosePosition(position);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"ERROR in OnTick: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Closes a position
+        /// </summary>
+        private void ClosePosition(Position position)
+        {
+            try
+            {
+                ClosePositionAsync(position);
+            }
+            catch (Exception ex)
+            {
+                Log($"ERROR closing position {position.Id}: {ex.Message}");
+            }
+        }
 
         /// <summary>
         /// Called when the robot stops
@@ -598,6 +623,12 @@ namespace cAlgo.Robots
         /// </summary>
         [JsonPropertyName("received_at")]
         public string ReceivedAt { get; set; }
+
+        /// <summary>
+        /// List of brokers that have already fetched this signal
+        /// </summary>
+        [JsonPropertyName("fetched_by")]
+        public List<string> FetchedBy { get; set; }
 
         /// <summary>
         /// Override ToString for logging

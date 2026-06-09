@@ -35,7 +35,7 @@ app.add_middleware(
 # MEMORY STORAGE
 # =========================================================
 latest_signal: Optional[Dict[str, Any]] = None
-signal_lock = None  # For thread-safe access
+fetched_by: set = set()  # Track which broker IDs have fetched this signal
 
 
 # =========================================================
@@ -43,7 +43,7 @@ signal_lock = None  # For thread-safe access
 # =========================================================
 @app.post("/webhook")
 async def receive_webhook(request: Request):
-    global latest_signal
+    global latest_signal, fetched_by
 
     try:
         body = await request.json()
@@ -66,6 +66,9 @@ async def receive_webhook(request: Request):
                 "message": "Missing required fields: symbol/action"
             }
 
+        # NEW SIGNAL: Reset fetched_by list
+        fetched_by = set()
+
         latest_signal = {
             "status": "success",
             "symbol": symbol,
@@ -78,8 +81,8 @@ async def receive_webhook(request: Request):
             "received_at": datetime.utcnow().isoformat() + "Z"
         }
 
-        logger.info(f"STORED SIGNAL: {latest_signal}")
-        logger.info(f"✓ Signal stored and ready for retrieval")
+        logger.info(f"✓ New signal stored: {symbol} {action} @ {entry}")
+        logger.info(f"✓ Fetched_by list reset")
 
         return {
             "status": "success",
@@ -97,24 +100,34 @@ async def receive_webhook(request: Request):
 
 
 # =========================================================
-# GET SIGNAL (FIXED - NEVER RETURNS 404)
+# GET SIGNAL (WITH BROKER ID TRACKING)
 # =========================================================
 @app.get("/signal")
-async def get_signal():
-    global latest_signal
+async def get_signal(id: str = "default"):
+    global latest_signal, fetched_by
     
     if latest_signal is None:
-        logger.debug("No signal yet requested by client")
+        logger.debug(f"[{id}] No signal available")
         return {
             "status": "no_signal",
             "message": "No TradingView signal received yet"
         }
 
+    # Check if this broker already fetched this signal
+    if id in fetched_by:
+        logger.info(f"[{id}] Already fetched this signal")
+        return {
+            "status": "already_fetched",
+            "message": f"Broker '{id}' has already fetched this signal",
+            "fetched_by": list(fetched_by)
+        }
+
+    # First time this broker fetches: add to fetched_by and return signal
+    fetched_by.add(id)
     signal_data = latest_signal.copy()
-    logger.info(f"✓ Signal retrieved by cBot: {signal_data.get('symbol')} {signal_data.get('action')}")
     
-    # Only clear after successful retrieval to prevent race conditions
-    latest_signal = None
+    logger.info(f"✓ [{id}] Signal delivered: {signal_data.get('symbol')} {signal_data.get('action')}")
+    logger.info(f"  Fetched by: {list(fetched_by)}")
     
     return signal_data
 
