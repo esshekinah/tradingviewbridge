@@ -21,7 +21,8 @@ logger = logging.getLogger("Signal-Fetcher")
 # =========================================================
 # CONFIGURATION
 # =========================================================
-TELEGRAM_URL = "https://t.me/s/txauusd2"
+TELEGRAM_CHANNEL_1 = "https://t.me/s/txauusd2"
+TELEGRAM_CHANNEL_2 = "https://t.me/s/BhadinTradingAcademy3680"
 WEBHOOK_URL = "http://localhost:25345/webhook"
 PROCESSED_SIGNALS_FILE = "processed_signal_ids.json"
 POLL_INTERVAL = 60  # 1 minute
@@ -59,7 +60,7 @@ def save_processed_ids(processed: set):
 # TELEGRAM SCRAPER
 # =========================================================
 
-async def scrape_telegram_messages(max_messages: int = 12) -> List[Dict]:
+async def scrape_telegram_messages(channel_url: str, max_messages: int = 12) -> List[Dict]:
     """
     Scrape latest N messages from Telegram channel.
     """
@@ -70,9 +71,9 @@ async def scrape_telegram_messages(max_messages: int = 12) -> List[Dict]:
         
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(TELEGRAM_URL) as response:
+            async with session.get(channel_url) as response:
                 if response.status != 200:
-                    logger.error(f"Failed to fetch Telegram: {response.status}")
+                    logger.error(f"Failed to fetch Telegram ({channel_url}): {response.status}")
                     return []
                 
                 html = await response.text()
@@ -102,7 +103,7 @@ async def scrape_telegram_messages(max_messages: int = 12) -> List[Dict]:
                 return messages
     
     except Exception as e:
-        logger.error(f"Scraping error: {str(e)}")
+        logger.error(f"Scraping error ({channel_url}): {str(e)}")
         return []
 
 
@@ -112,41 +113,44 @@ async def scrape_telegram_messages(max_messages: int = 12) -> List[Dict]:
 
 def parse_trading_signal(text: str) -> Optional[Dict]:
     """
-    Parse trading signal text to extract symbol, action, entry, and SL.
+    Parse trading signal text to extract symbol, action, entry, SL, and TP levels.
+    Handles formats like:
+    - XAUUSD BUY. 4286  TP 4290 TP 4293 TP 4296 TP 4300  SL 4276
+    - XAUUSD SELL. 4335  TP 4332 TP 4329 TP 4326 TP 4322  SL 4345
     """
     try:
         text = text.strip()
         
-        # Extract symbol
+        # Extract symbol (6 uppercase letters like XAUUSD)
         symbol_match = re.search(r'^([A-Z]{6})\s+', text)
         if not symbol_match:
             return None
         
         symbol = symbol_match.group(1)
         
-        # Extract action
+        # Extract action (BUY or SELL)
         action_match = re.search(r'\b(Buy|Sell|BUY|SELL)\b', text, re.IGNORECASE)
         if not action_match:
             return None
         
         action = action_match.group(1).upper()
         
-        # Extract entry price
+        # Extract entry price (first number after action)
         remaining_text = text[action_match.end():]
-        entry_match = re.search(r'(\d+(?:\.\d+)?)', remaining_text)
+        entry_match = re.search(r'[\.\s]+(\d+(?:\.\d+)?)', remaining_text)
         if not entry_match:
             return None
         
         entry = float(entry_match.group(1))
         
-        # Extract SL
+        # Extract SL (Stop Loss)
         sl_match = re.search(r'SL\s+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
         if not sl_match:
             return None
         
         sl = float(sl_match.group(1))
         
-        # Extract TP levels
+        # Extract TP levels (Take Profit)
         tp_matches = re.findall(r'TP\s+(\d+(?:\.\d+)?)', text, re.IGNORECASE)
         tp_levels = [float(tp) for tp in tp_matches] if tp_matches else []
         
@@ -208,22 +212,29 @@ async def send_signal_to_webhook(signal: Dict) -> bool:
 
 async def fetch_and_process():
     """
-    Main loop: fetch messages, check for new signals, and send them.
+    Main loop: fetch messages from both channels, check for new signals, and send them.
     """
-    logger.info(f"Starting Signal Fetcher - fetching {MAX_MESSAGES} latest messages every {POLL_INTERVAL}s")
+    logger.info(f"Starting Signal Fetcher - monitoring 2 channels every {POLL_INTERVAL}s")
+    logger.info(f"  Channel 1: {TELEGRAM_CHANNEL_1}")
+    logger.info(f"  Channel 2: {TELEGRAM_CHANNEL_2}")
     
     processed_signals = load_processed_ids()
     logger.info(f"Loaded {len(processed_signals)} previously processed signals")
     
     while True:
         try:
-            logger.info("Fetching latest messages from Telegram...")
-            messages = await scrape_telegram_messages(MAX_MESSAGES)
-            logger.info(f"Fetched {len(messages)} messages")
+            logger.info("Fetching latest messages from both channels...")
+            
+            # Fetch from both channels in parallel
+            messages_1 = await scrape_telegram_messages(TELEGRAM_CHANNEL_1, MAX_MESSAGES)
+            messages_2 = await scrape_telegram_messages(TELEGRAM_CHANNEL_2, MAX_MESSAGES)
+            
+            all_messages = messages_1 + messages_2
+            logger.info(f"Fetched {len(messages_1)} from channel 1, {len(messages_2)} from channel 2")
             
             new_signals_count = 0
             
-            for msg in messages:
+            for msg in all_messages:
                 msg_id = msg.get("id")
                 msg_text = msg.get("text")
                 
