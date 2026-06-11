@@ -58,6 +58,8 @@ async def receive_webhook(request: Request):
         tp_levels = body.get("tp_levels", [])
         price = body.get("price")
         time = body.get("time")
+        telegram_id = body.get("telegram_id", "unknown")
+        channel = body.get("channel", "unknown")
 
         if not symbol or not action:
             logger.warning("Invalid webhook: missing symbol/action")
@@ -78,17 +80,21 @@ async def receive_webhook(request: Request):
             "tp_levels": tp_levels,
             "price": price,
             "time": time,
-            "received_at": datetime.utcnow().isoformat() + "Z"
+            "received_at": datetime.utcnow().isoformat() + "Z",
+            "telegram_id": telegram_id,
+            "channel": channel
         }
 
         logger.info(f"✓ New signal stored: {symbol} {action} @ {entry}")
+        logger.info(f"✓ Telegram ID: {telegram_id} | Channel: {channel}")
         logger.info(f"✓ Fetched_by list reset")
 
         return {
             "status": "success",
             "message": "signal stored",
             "symbol": symbol,
-            "action": action
+            "action": action,
+            "telegram_id": telegram_id
         }
 
     except Exception as e:
@@ -115,10 +121,12 @@ async def get_signal(id: str = "default"):
 
     # Check if this broker already fetched this signal
     if id in fetched_by:
-        logger.info(f"[{id}] Already fetched this signal")
+        logger.info(f"[{id}] Already fetched this signal (TG ID: {latest_signal.get('telegram_id')})")
         return {
             "status": "already_fetched",
             "message": f"Broker '{id}' has already fetched this signal",
+            "telegram_id": latest_signal.get("telegram_id"),
+            "channel": latest_signal.get("channel"),
             "fetched_by": list(fetched_by)
         }
 
@@ -126,7 +134,7 @@ async def get_signal(id: str = "default"):
     fetched_by.add(id)
     signal_data = latest_signal.copy()
     
-    logger.info(f"✓ [{id}] Signal delivered: {signal_data.get('symbol')} {signal_data.get('action')}")
+    logger.info(f"✓ [{id}] Signal delivered: {signal_data.get('symbol')} {signal_data.get('action')} (TG ID: {signal_data.get('telegram_id')})")
     logger.info(f"  Fetched by: {list(fetched_by)}")
     
     return signal_data

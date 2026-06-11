@@ -63,6 +63,20 @@ namespace cAlgo.Robots
         public string Key { get; set; }
 
         /// <summary>
+        /// Telegram channel filter
+        /// Choose which channel to trade signals from, or "All Channels"
+        /// Options: txauusd2, BhadinTradingAcademy3680, tradeH_public, All Channels
+        /// </summary>
+        [Parameter("Telegram Channel", DefaultValue = "All Channels", Group = "Server")]
+        public string TelegramChannelFilter { get; set; }
+
+        // Channel names (match signal_fetcher.py)
+        private const string CHANNEL_TXAUUSD2 = "txauusd2";
+        private const string CHANNEL_BHADINTRADING = "BhadinTradingAcademy3680";
+        private const string CHANNEL_TRADEH = "tradeH_public";
+        private const string CHANNEL_ALL = "All Channels";
+
+        /// <summary>
         /// Polling interval in milliseconds
         /// Default: 5000 (5 seconds)
         /// </summary>
@@ -153,6 +167,8 @@ namespace cAlgo.Robots
                 Log($"Protocol: {(UseHttps ? "HTTPS" : "HTTP")}");
                 Log($"Poll Interval: {PollIntervalMs}ms");
                 Log($"Volume: {Volume} lots");
+                Log($"Telegram Channel Filter: {TelegramChannelFilter}");
+                Log($"  Available: All Channels, txauusd2, BhadinTradingAcademy3680, tradeH_public");
 
                 // Initialize HTTP client with timeout
                 _httpClient = new HttpClient();
@@ -207,31 +223,41 @@ namespace cAlgo.Robots
                     // Check signal status first
                     if (signal.Status == "success")
                     {
-                        // Prevent concurrent polling with lock
-                        lock (_lockObject)
+                        // Check if signal matches channel filter
+                        bool channelMatches = IsChannelAllowed(signal.Channel);
+                        
+                        if (!channelMatches)
                         {
-                            // Only check for duplicates if status is success
-                            if (!IsDuplicateSignal(signal))
+                            Log($"ℹ Signal ignored (channel filter): {signal.Channel} not in filter '{TelegramChannelFilter}'");
+                        }
+                        else
+                        {
+                            // Prevent concurrent polling with lock
+                            lock (_lockObject)
                             {
-                                Log($"✓ NEW SIGNAL: {signal.Symbol} {signal.Action} @ {signal.Entry}");
-                                Log($"  Entry: {signal.Entry} | SL: {signal.StopLoss} | TP: {string.Join(",", signal.TakeProfitLevels ?? new List<double>())}");
-
-                                // Update last signal tracking
-                                _lastSignal = signal;
-                                _lastSignalTime = DateTime.UtcNow;
-
-                                // Execute trade on main thread
-                                BeginInvokeOnMainThread(async () =>
+                                // Only check for duplicates if status is success
+                                if (!IsDuplicateSignal(signal))
                                 {
-                                    try
+                                    Log($"✓ NEW SIGNAL: {signal.Symbol} {signal.Action} @ {signal.Entry} (Channel: {signal.Channel})");
+                                    Log($"  Entry: {signal.Entry} | SL: {signal.StopLoss} | TP: {string.Join(",", signal.TakeProfitLevels ?? new List<double>())}");
+
+                                    // Update last signal tracking
+                                    _lastSignal = signal;
+                                    _lastSignalTime = DateTime.UtcNow;
+
+                                    // Execute trade on main thread
+                                    BeginInvokeOnMainThread(async () =>
                                     {
-                                        await ExecuteTradeAsync(signal);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Log($"ERROR executing trade: {ex.Message}");
-                                    }
-                                });
+                                        try
+                                        {
+                                            await ExecuteTradeAsync(signal);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Log($"ERROR executing trade: {ex.Message}");
+                                        }
+                                    });
+                                }
                             }
                         }
                     }
@@ -309,6 +335,29 @@ namespace cAlgo.Robots
                 Log($"ERROR in FetchSignalAsync: {ex.Message}");
                 return null;
             }
+        }
+
+        // ============================================================================
+        // CHANNEL FILTERING
+        // ============================================================================
+
+        /// <summary>
+        /// Checks if signal channel matches the configured filter
+        /// </summary>
+        /// <param name="signalChannel">Channel from the signal</param>
+        /// <returns>True if channel is allowed, false otherwise</returns>
+        private bool IsChannelAllowed(string signalChannel)
+        {
+            // If filter is "All Channels", accept all signals
+            if (TelegramChannelFilter == CHANNEL_ALL || string.IsNullOrEmpty(TelegramChannelFilter))
+                return true;
+            
+            // If filter is set, check if signal channel matches
+            if (string.IsNullOrEmpty(signalChannel))
+                return false;
+            
+            // Match channel name (case-insensitive)
+            return signalChannel.Equals(TelegramChannelFilter, System.StringComparison.OrdinalIgnoreCase);
         }
 
         // ============================================================================
@@ -441,8 +490,11 @@ namespace cAlgo.Robots
                     Log($"  SL: {signal.StopLoss}");
                     Log($"  TP{TakeProfitLevel}: {takeProfit.Value}");
 
-                    // Execute market order, then attach price-based SL/TP from the webhook signal.
-                    TradeResult result = ExecuteMarketOrder(tradeType, SymbolName, Volume, "WebhookBridge");
+                    // Create label with channel name
+                    string label = signal.Channel;
+
+                    // Execute market order with channel in label
+                    TradeResult result = ExecuteMarketOrder(tradeType, SymbolName, Volume, label);
 
                     // Log trade result
                     if (result.IsSuccessful)
@@ -450,6 +502,7 @@ namespace cAlgo.Robots
                         ModifyPosition(result.Position, signal.StopLoss, takeProfit.Value, ProtectionType.Absolute);
                         Log($"✓ POSITION OPENED");
                         Log($"  Type: {tradeType} | Volume: {Volume} | Symbol: {symbol.Name}");
+                        Log($"  Channel: {signal.Channel}");
                         Log($"  Entry Price: {currentPrice}");
                         Log($"  SL: {signal.StopLoss} | TP: {takeProfit.Value}");
                         Log($"  Position ID: {result.Position.Id}");
@@ -651,6 +704,12 @@ namespace cAlgo.Robots
         /// </summary>
         [JsonPropertyName("received_at")]
         public string ReceivedAt { get; set; }
+
+        /// <summary>
+        /// Telegram channel that sent this signal
+        /// </summary>
+        [JsonPropertyName("channel")]
+        public string Channel { get; set; }
 
         /// <summary>
         /// Override ToString for logging
