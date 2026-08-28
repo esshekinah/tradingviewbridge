@@ -16,6 +16,7 @@ An FVG (a.k.a. imbalance) is a classic 3-candle pattern representing an untraded
 | Setting | Description |
 |---|---|
 | **Show 4H / 15M** | Toggle each timeframe independently |
+| **Only 15M inside 4H (confluence)** | When enabled, a 15M FVG is drawn **only if any part of its range overlaps an active 4H FVG zone** — filtering for high-probability confluence setups |
 | **Colors** | Separate bull/bear colors per timeframe for easy identification |
 | **Max FVGs per set** | Trims oldest gaps to keep the chart clean |
 | **Extend boxes** | How far right each gap box projects |
@@ -31,6 +32,14 @@ The timeframes are configurable inputs, so you can repurpose the indicator for a
 2. Paste in the contents of [`multi_tf_fvg.pine`](./multi_tf_fvg.pine).
 3. Click **Add to chart**.
 4. Adjust colors/timeframes via the indicator settings (⚙️).
+
+## Confluence filter (15M inside 4H)
+
+By default, the indicator only shows **15M FVGs that overlap a 4H FVG**. Overlap counts whether the 15M gap is *fully* inside the 4H zone or only *partly* inside it (two ranges overlap when each starts before the other ends).
+
+- 4H zones are always tracked for the filter even if you hide them visually (turn off **Show 4H FVGs** but keep the confluence toggle on).
+- When a 4H FVG gets mitigated, it stops qualifying as confluence for new 15M FVGs.
+- Turn the toggle off to see all 15M FVGs regardless of 4H context.
 
 ## Notes
 
