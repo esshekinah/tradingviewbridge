@@ -33,6 +33,17 @@ The timeframes are configurable inputs, so you can repurpose the indicator for a
 3. Click **Add to chart**.
 4. Adjust colors/timeframes via the indicator settings (⚙️).
 
+## Buy / Sell signals (level alignment)
+
+Each FVG has three levels: **Bottom**, **CE** (Consequent Encroachment = midpoint), and **Top**.
+
+When a new 15M FVG forms, the indicator compares its three levels against the three levels of every active 4H FVG — 9 line-to-line distance checks per 4H FVG. If **any** 4H level sits within the configurable **Max line distance (price points)** of **any** 15M level, a signal is plotted:
+
+- **BUY** (green ▲ below bar) when the 15M FVG is bullish
+- **SELL** (red ▼ above bar) when the 15M FVG is bearish
+
+The threshold is measured in raw **price points** (e.g. `4.0` means 4.0 in the instrument's price), so set it to match the symbol's scale — for example a few points on an index like US Tech 100. Both signal colors are configurable, and alerts fire for BUY/SELL.
+
 ## Confluence filter (15M inside 4H)
 
 By default, the indicator only shows **15M FVGs that overlap a 4H FVG**. Overlap counts whether the 15M gap is *fully* inside the 4H zone or only *partly* inside it (two ranges overlap when each starts before the other ends).
