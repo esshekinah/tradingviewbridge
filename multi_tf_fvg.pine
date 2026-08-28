@@ -1,0 +1,128 @@
+//@version=5
+indicator("Multi-TF FVG (4H + 15M)", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+// ============================================================================
+// Multi-Timeframe Fair Value Gap (FVG) Indicator
+// ----------------------------------------------------------------------------
+// Detects Fair Value Gaps on the 4H and 15M timeframes and draws them on
+// ANY chart timeframe you are currently viewing.
+//
+// An FVG (a.k.a. imbalance) is a 3-candle pattern:
+//   Bullish FVG : low of candle[1]  >  high of candle[3]   (gap between them)
+//   Bearish FVG : high of candle[1] <  low  of candle[3]   (gap between them)
+// The gap is the untraded price range between candle 1 and candle 3.
+// ============================================================================
+
+
+// ─────────────────────────────── Inputs ────────────────────────────────────
+grp1 = "4H FVG Settings"
+show4h        = input.bool(true,  "Show 4H FVGs",                 group=grp1)
+tf4h          = input.timeframe("240", "4H Timeframe",            group=grp1)
+bull4hCol     = input.color(color.new(color.teal,   80), "4H Bullish",  group=grp1, inline="c4")
+bear4hCol     = input.color(color.new(color.red,    80), "4H Bearish",  group=grp1, inline="c4")
+
+grp2 = "15M FVG Settings"
+show15m       = input.bool(true,  "Show 15M FVGs",                group=grp2)
+tf15m         = input.timeframe("15", "15M Timeframe",            group=grp2)
+bull15mCol    = input.color(color.new(color.aqua,   70), "15M Bullish", group=grp2, inline="c15")
+bear15mCol    = input.color(color.new(color.orange, 70), "15M Bearish", group=grp2, inline="c15")
+
+grp3 = "General"
+maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100, group=grp3)
+extendBars    = input.int(30,  "Extend boxes (bars)",      minval=0, maxval=500, group=grp3)
+removeFilled  = input.bool(true, "Remove FVG when filled (mitigated)", group=grp3)
+showLabels    = input.bool(true, "Show timeframe labels",   group=grp3)
+borderWidth   = input.int(1,   "Border width", minval=0, maxval=4, group=grp3)
+
+
+// ─────────────────────────── FVG data type ─────────────────────────────────
+type FVG
+    box   bx
+    float top
+    float bot
+    bool  isBull
+    bool  filled
+
+
+// ─────────────── Request 3-candle data from a higher timeframe ──────────────
+// We pull high/low of candle[1] and candle[3] plus the bar time of candle[2]
+// (the middle candle, which anchors the gap on the timeline).
+// Wrapped in a function so we can reuse it for each timeframe.
+reqTF(simple string tf) =>
+    request.security(syminfo.tickerid, tf,
+         [high[1], low[1], high[3], low[3], time[2], ta.change(time[1]) != 0],
+         lookahead=barmerge.lookahead_off)
+
+
+// ─────────────────────── FVG detection + drawing ───────────────────────────
+// Detects a new FVG on the given HTF stream and appends a box to the array.
+detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, bool isNew, color bullCol, color bearCol, string tfLabel, bool showLbl) =>
+    if isNew and not na(hh1) and not na(hh3)
+        bool bull = ll1 > hh3          // gap up: current low above old high
+        bool bear = hh1 < ll3          // gap down: current high below old low
+        if bull or bear
+            float top = bull ? ll1 : ll3
+            float bot = bull ? hh3 : hh1
+            color col = bull ? bullCol : bearCol
+            box b = box.new(
+                 left   = t2mid,
+                 top    = top,
+                 right  = t2mid + 1,
+                 bottom = bot,
+                 xloc   = xloc.bar_time,
+                 border_color = color.new(col, 0),
+                 border_width = borderWidth,
+                 bgcolor = col)
+            if showLbl
+                box.set_text(b, tfLabel + (bull ? " Bull FVG" : " Bear FVG"))
+                box.set_text_size(b, size.tiny)
+                box.set_text_color(b, color.new(color.gray, 20))
+                box.set_text_halign(b, text.align_left)
+                box.set_text_valign(b, text.align_center)
+            store.push(FVG.new(b, top, bot, bull, false))
+            // Trim oldest
+            if store.size() > maxFvgs
+                FVG old = store.shift()
+                box.delete(old.bx)
+
+
+// Keeps FVG boxes extending to the right, and removes mitigated ones.
+maintainFVG(array<FVG> store) =>
+    if store.size() > 0
+        for i = store.size() - 1 to 0
+            FVG f = store.get(i)
+            if not f.filled
+                // extend the box forward in time
+                box.set_right(f.bx, time + extendBars * (timeframe.in_seconds() * 1000))
+                // mitigation check: price traded fully through the gap
+                bool mitigated = f.isBull ? (low <= f.bot) : (high >= f.top)
+                if mitigated
+                    f.filled := true
+                    if removeFilled
+                        box.delete(f.bx)
+                        store.remove(i)
+
+
+// ───────────────────────────── Storage ─────────────────────────────────────
+var array<FVG> fvg4h  = array.new<FVG>()
+var array<FVG> fvg15m = array.new<FVG>()
+
+
+// ─────────────────────── Pull HTF streams ──────────────────────────────────
+[H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, isNew4h]     = reqTF(tf4h)
+[H1_15, L1_15, H3_15, L3_15, T2_15, isNew15]     = reqTF(tf15m)
+
+
+// ─────────────────────────── Run detection ─────────────────────────────────
+if show4h
+    detectFVG(fvg4h,  H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, isNew4h, bull4hCol,  bear4hCol,  "4H",  showLabels)
+    maintainFVG(fvg4h)
+
+if show15m
+    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, isNew15, bull15mCol, bear15mCol, "15M", showLabels)
+    maintainFVG(fvg15m)
+
+
+// ───────────────────────────── Alerts ──────────────────────────────────────
+alertcondition(isNew4h and show4h,   "New 4H FVG",  "A new 4H Fair Value Gap has formed")
+alertcondition(isNew15 and show15m,  "New 15M FVG", "A new 15M Fair Value Gap has formed")
