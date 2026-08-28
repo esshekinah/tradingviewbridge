@@ -62,14 +62,16 @@ reqTF(simple string tf) =>
 
 
 // Returns true if the price range [bot, top] overlaps any active (unfilled)
-// FVG in the given confluence set. Overlap = "fully inside" OR "partly inside".
-overlapsAny(array<FVG> conf, float bot, float top) =>
+// FVG in the given confluence set THAT MATCHES the given direction.
+// Overlap = "fully inside" OR "partly inside". A bullish 15M FVG only pairs
+// with a bullish 4H FVG, and a bearish 15M FVG only with a bearish 4H FVG.
+overlapsAny(array<FVG> conf, float bot, float top, bool isBull) =>
     bool hit = false
     if conf.size() > 0
         for i = 0 to conf.size() - 1
             FVG z = conf.get(i)
             // Two ranges overlap when each starts before the other ends.
-            if not z.filled and bot <= z.top and z.bot <= top
+            if not z.filled and z.isBull == isBull and bot <= z.top and z.bot <= top
                 hit := true
     hit
 
@@ -79,14 +81,14 @@ ce(float top, float bot) => (top + bot) / 2.0
 
 
 // Compares the 3 levels (Bottom, CE, Top) of a 15M FVG against the 3 levels of
-// every active 4H FVG. Returns true if ANY 4H level is within `thresh` price
-// points of ANY 15M level (9 pairwise comparisons per 4H FVG).
-levelsAligned(array<FVG> conf, float bot15, float ce15, float top15, float thresh) =>
+// every active 4H FVG OF THE SAME DIRECTION. Returns true if ANY 4H level is
+// within `thresh` price points of ANY 15M level (9 pairwise comparisons).
+levelsAligned(array<FVG> conf, float bot15, float ce15, float top15, float thresh, bool isBull) =>
     bool aligned = false
     if conf.size() > 0
         for i = 0 to conf.size() - 1
             FVG z = conf.get(i)
-            if not z.filled
+            if not z.filled and z.isBull == isBull
                 float ce4 = ce(z.top, z.bot)
                 // 3 x 3 = 9 line-to-line distance checks.
                 bool near = math.abs(z.bot - bot15) <= thresh or math.abs(z.bot - ce15) <= thresh or math.abs(z.bot - top15) <= thresh or math.abs(ce4 - bot15) <= thresh or math.abs(ce4 - ce15) <= thresh or math.abs(ce4 - top15) <= thresh or math.abs(z.top - bot15) <= thresh or math.abs(z.top - ce15) <= thresh or math.abs(z.top - top15) <= thresh
@@ -110,8 +112,8 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
         if bull or bear
             float top = bull ? ll1 : ll3
             float bot = bull ? hh3 : hh1
-            // Confluence filter: skip 15M FVGs not overlapping a 4H FVG.
-            bool passConf = requireConf ? overlapsAny(conf, bot, top) : true
+            // Confluence filter: skip 15M FVGs not overlapping a SAME-DIRECTION 4H FVG.
+            bool passConf = requireConf ? overlapsAny(conf, bot, top, bull) : true
             if passConf
                 drawn   := true
                 newTop  := top
@@ -195,7 +197,7 @@ bool buySignal  = false
 bool sellSignal = false
 if showSignals and drew15m and not na(new15Bot)
     float ce15 = ce(new15Top, new15Bot)
-    bool aligned = levelsAligned(fvg4h, new15Bot, ce15, new15Top, signalThresh)
+    bool aligned = levelsAligned(fvg4h, new15Bot, ce15, new15Top, signalThresh, new15Bull)
     if aligned
         buySignal  := new15Bull
         sellSignal := not new15Bull
