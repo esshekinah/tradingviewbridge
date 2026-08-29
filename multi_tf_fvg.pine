@@ -42,6 +42,7 @@ lineWidth     = input.int(1, "Line width", minval=1, maxval=4, group=grp5)
 showTopLn     = input.bool(true, "Show Top line",    group=grp5, inline="which")
 showCELn      = input.bool(true, "Show CE line",     group=grp5, inline="which")
 showBotLn     = input.bool(true, "Show Bottom line", group=grp5, inline="which")
+mitModeInp    = input.string("Wick", "Mitigation by", options=["Wick","Body"], group=grp5, tooltip="A level freezes only when price RE-ENTERS the gap from the correct side. Wick = the candle wick reaching the level (high/low); Body = the candle body reaching it (open/close).")
 
 grp6 = "Proximity Arrow"
 showArrows    = input.bool(true, "Show proximity arrows", group=grp6, tooltip="Draw a red left-pointing arrow whenever any 4H level (Top/CE/Bottom) is within the threshold of any same-direction 15M level. The arrow is removed if either linked level is mitigated.")
@@ -109,6 +110,20 @@ reqTF(simple string tf) =>
 
 // CE (Consequent Encroachment) = midpoint of an FVG.
 ceOf(float top, float bot) => (top + bot) / 2.0
+
+// Has price reached `lvl` from BELOW (rallying up into it)? Used to mitigate
+// bearish-FVG levels, which sit above and are filled when price rallies back up.
+//   Wick mode → the bar's high reaches lvl.
+//   Body mode → the bar's body top (max of open/close) reaches lvl.
+reachedFromBelow(float lvl) =>
+    (mitModeInp == "Body" ? math.max(open, close) : high) >= lvl
+
+// Has price reached `lvl` from ABOVE (dropping down into it)? Used to mitigate
+// bullish-FVG levels, which sit below and are filled when price drops back down.
+//   Wick mode → the bar's low reaches lvl.
+//   Body mode → the bar's body bottom (min of open/close) reaches lvl.
+reachedFromAbove(float lvl) =>
+    (mitModeInp == "Body" ? math.min(open, close) : low) <= lvl
 
 // Map label-size input string to a Pine size constant.
 lblSize() =>
@@ -203,12 +218,16 @@ maintainFVG(array<FVG> store) =>
         for i = 0 to store.size() - 1
             FVG f = store.get(i)
 
-            // Top level ─ mitigated once price trades up to it (high >= top).
+            // A level is mitigated only when price RE-ENTERS the gap from the
+            // side it was left open:
+            //   Bullish FVG (gap below price) → filled from ABOVE  (price drops in)
+            //   Bearish FVG (gap above price) → filled from BELOW  (price rallies in)
             // On mitigation, freeze the line's right edge at THIS bar's time so
-            // it ends exactly where price hit it (not at the projected future
-            // endpoint it had while still active).
+            // it ends exactly where price re-entered it.
+
+            // Top level.
             if not f.topDone
-                bool hitTop = high >= f.top
+                bool hitTop = f.isBull ? reachedFromAbove(f.top) : reachedFromBelow(f.top)
                 if hitTop
                     f.topDone := true
                     if not na(f.topLn)
@@ -221,9 +240,9 @@ maintainFVG(array<FVG> store) =>
                     if not na(f.topLbl)
                         label.set_x(f.topLbl, time)
 
-            // Bottom level ─ mitigated once price trades down to it (low <= bot).
+            // Bottom level.
             if not f.botDone
-                bool hitBot = low <= f.bot
+                bool hitBot = f.isBull ? reachedFromAbove(f.bot) : reachedFromBelow(f.bot)
                 if hitBot
                     f.botDone := true
                     if not na(f.botLn)
@@ -235,9 +254,9 @@ maintainFVG(array<FVG> store) =>
                     if not na(f.botLbl)
                         label.set_x(f.botLbl, time)
 
-            // CE level ─ mitigated when price trades through the midpoint.
+            // CE (midpoint) level.
             if not f.ceDone
-                bool hitCE = low <= f.ce and high >= f.ce
+                bool hitCE = f.isBull ? reachedFromAbove(f.ce) : reachedFromBelow(f.ce)
                 if hitCE
                     f.ceDone := true
                     if not na(f.ceLn)

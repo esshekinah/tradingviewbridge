@@ -24,7 +24,17 @@ Instead of a shaded rectangle, every FVG is drawn as **three horizontal lines** 
 - `+` = **bullish** FVG (drawn in **white** by default)
 - `-` = **bearish** FVG (drawn in **red** by default)
 
-Each line extends to the right until **its own level is mitigated** (touched by price), then it is **discontinued** — frozen at the bar where price reached it. The Top, CE, and Bottom of a single FVG are mitigated independently.
+Each line extends to the right until **its own level is mitigated**, then it is **discontinued** — frozen at the bar where price re-entered it. The Top, CE, and Bottom of a single FVG are mitigated independently.
+
+**Mitigation is directional** — a level only counts as mitigated when price **re-enters the gap from the side it was left open**, not when the original impulse move created/extended it:
+
+- **Bullish FVG** (gap below price) → filled from **above** (price drops back down into it)
+- **Bearish FVG** (gap above price) → filled from **below** (price rallies back up into it)
+
+**Wick / Body mode** (setting: *Mitigation by*) chooses what counts as reaching a level:
+
+- **Wick** — the candle wick reaches the level (`high` / `low`)
+- **Body** — the candle body reaches it (`max(open, close)` / `min(open, close)`)
 
 ## Features
 
