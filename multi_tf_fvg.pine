@@ -63,6 +63,13 @@ showLabels    = input.bool(true, "Show text labels",   group=grp4)
 lblSizeInp    = input.string("Small", "Label text size", options=["Tiny","Small","Normal","Large"], group=grp4)
 lblFontInp    = input.string("Default", "Label font", options=["Default","Monospace"], group=grp4, tooltip="Pine Script only supports these two font families — a true Arial cannot be selected. 'Default' is TradingView's standard sans-serif (Arial-like).")
 
+grp7 = "Dashboard (color legend)"
+showDash      = input.bool(true, "Show dashboard", group=grp7)
+dashPosInp    = input.string("Top Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left","Middle Right"], group=grp7)
+dashSizeInp   = input.string("Small", "Dashboard text size", options=["Tiny","Small","Normal","Large"], group=grp7)
+dashBgCol     = input.color(color.new(color.black, 20), "Background", group=grp7, inline="dbg")
+dashTxtCol    = input.color(color.white, "Text", group=grp7, inline="dbg")
+
 
 // ─────────────────────────── FVG data type ─────────────────────────────────
 // Each FVG owns 3 lines and their 3 labels. A line is `na` when its level is
@@ -117,6 +124,12 @@ lblSize() =>
 // Pine only exposes these two families — no custom/Arial font is available.
 lblFont() =>
     lblFontInp == "Monospace" ? font.family_monospace : font.family_default
+
+// Map dashboard position / size input strings to Pine constants.
+dashPos() =>
+    dashPosInp == "Top Left" ? position.top_left : dashPosInp == "Bottom Right" ? position.bottom_right : dashPosInp == "Bottom Left" ? position.bottom_left : dashPosInp == "Middle Right" ? position.middle_right : position.top_right
+dashSize() =>
+    dashSizeInp == "Tiny" ? size.tiny : dashSizeInp == "Normal" ? size.normal : dashSizeInp == "Large" ? size.large : size.small
 
 
 // Returns true if the given 4H FVG levels are within `thresh` price points of
@@ -359,6 +372,36 @@ if showSignals and new4h and not na(n4Bot)
 
 plotshape(buySignal,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=buySigCol,  size=size.small, text="BUY",  textcolor=buySigCol)
 plotshape(sellSignal, title="Sell", style=shape.triangledown, location=location.abovebar, color=sellSigCol, size=size.small, text="SELL", textcolor=sellSigCol)
+
+
+// ─────────────────────────── Dashboard (legend) ────────────────────────────
+// A small color legend explaining what each line/marker color means. Built
+// once on the last bar for efficiency; rebuilt if inputs change.
+var table dash = na
+if showDash and barstate.islast
+    if not na(dash)
+        table.delete(dash)
+    dash := table.new(position = dashPos(), columns = 2, rows = 8, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
+
+    // Header
+    table.cell(dash, 0, 0, "FVG Legend", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 1, 0, "", text_color = dashTxtCol, text_size = dashSize())
+
+    // Helper via inline rows: swatch cell (colored bg) + description cell.
+    table.cell(dash, 0, 1, "  ", bgcolor = bull4hCol)
+    table.cell(dash, 1, 1, "+4H FVG (bullish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 2, "  ", bgcolor = bear4hCol)
+    table.cell(dash, 1, 2, "-4H FVG (bearish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 3, "  ", bgcolor = bull15mCol)
+    table.cell(dash, 1, 3, "+15M FVG (bullish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 4, "  ", bgcolor = bear15mCol)
+    table.cell(dash, 1, 4, "-15M FVG (bearish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 5, "  ", bgcolor = buySigCol)
+    table.cell(dash, 1, 5, "Buy signal",       text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 6, "  ", bgcolor = sellSigCol)
+    table.cell(dash, 1, 6, "Sell signal",      text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 7, "  ", bgcolor = arrowCol)
+    table.cell(dash, 1, 7, "Proximity arrow",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
 
 
 // ───────────────────────────── Alerts ──────────────────────────────────────
