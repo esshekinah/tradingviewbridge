@@ -67,6 +67,15 @@ Because a 4H FVG is only confirmed once its third candle closes (~8 hours after 
 
 The threshold is measured in raw **price points** (e.g. `4.0` means 4.0 in the instrument's price), so set it to match the symbol's scale — for example a few points on an index like US Tech 100. Both signal colors are configurable, and alerts fire for BUY/SELL.
 
+## Proximity arrows
+
+When any **4H level** (Top / CE / Bottom) sits within a configurable distance of any **same-direction 15M level**, a **red left-pointing arrow** is drawn at the midpoint price between the two close lines, pointing left toward them.
+
+- **Arrow max distance (points)** — threshold in raw price points (default `4`).
+- Only **same-direction** pairs are considered, and only when the 15M FVG formed during the 4H displacement window (same rule as the signals).
+- The arrow is **removed automatically if either linked level is mitigated** — as soon as price touches the 4H level or the 15M level it connects, the arrow disappears.
+- Color, width, and length (how far the tail extends to the right) are configurable.
+
 ## Notes
 
 - Uses non-repainting `request.security` (`lookahead_off`), so gaps confirm only after the higher-timeframe candle closes — this avoids repainting and false signals.

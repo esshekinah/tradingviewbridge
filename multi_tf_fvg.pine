@@ -47,6 +47,13 @@ signalThresh  = input.float(4.0, "Max line distance (price points)", minval=0.0,
 buySigCol     = input.color(color.lime, "Buy signal",  group=grp3, inline="sig")
 sellSigCol    = input.color(color.red,  "Sell signal", group=grp3, inline="sig")
 
+grp6 = "Proximity Arrow"
+showArrows    = input.bool(true, "Show proximity arrows", group=grp6, tooltip="Draw a red left-pointing arrow whenever any 4H level (Top/CE/Bottom) is within the threshold of any same-direction 15M level. The arrow is removed if either linked level is mitigated.")
+arrowThresh   = input.float(4.0, "Arrow max distance (points)", minval=0.0, step=0.1, group=grp6)
+arrowCol      = input.color(color.red, "Arrow color", group=grp6)
+arrowWidth    = input.int(2, "Arrow width", minval=1, maxval=5, group=grp6)
+arrowLen      = input.int(20, "Arrow length (bars)", minval=1, maxval=200, group=grp6, tooltip="How far to the right of the lines the arrow's tail extends. The arrowhead points left toward the two close lines.")
+
 grp4 = "General"
 maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100, group=grp4)
 extendBars    = input.int(30,  "Extend lines (bars)",      minval=0, maxval=500, group=grp4)
@@ -74,6 +81,17 @@ type FVG
     bool  topDone
     bool  ceDone
     bool  botDone
+
+
+// A proximity arrow linking a 4H level to a nearby same-direction 15M level.
+// `f4`/`f15` are the two FVGs; `lvl4`/`lvl15` are the level indices
+// (0 = Top, 1 = CE, 2 = Bottom) so we can watch each side's mitigation flag.
+type Arrow
+    line ln
+    FVG  f4
+    int  lvl4
+    FVG  f15
+    int  lvl15
 
 
 // ─────────────── Request 3-candle data from a higher timeframe ──────────────
@@ -112,6 +130,15 @@ signalOn4hConfirm(array<FVG> m15, float bot4, float top4, int dStart, int dEnd, 
                 if levelsNear(bot4, ce4, top4, f.bot, f.ce, f.top, thresh)
                     hit := true
     hit
+
+
+// Price of a level by index: 0 = Top, 1 = CE, 2 = Bottom.
+lvlPrice(FVG f, int idx) =>
+    idx == 0 ? f.top : idx == 1 ? f.ce : f.bot
+
+// Whether a level (by index) has been mitigated (its *Done flag).
+lvlDone(FVG f, int idx) =>
+    idx == 0 ? f.topDone : idx == 1 ? f.ceDone : f.botDone
 
 
 // Create one horizontal level line + right-end label. Returns [line, label].
@@ -213,9 +240,41 @@ maintainFVG(array<FVG> store) =>
                             label.set_x(f.ceLbl, newRight)
 
 
+// When a 4H FVG has just confirmed, create a red left-pointing arrow for every
+// (4H level, 15M level) pair — same direction, 15M formed during the 4H
+// displacement window — whose prices are within `thresh` points. The arrow is
+// stored so it can be removed later if either linked level is mitigated.
+addArrows(array<Arrow> arrows, FVG f4, array<FVG> m15, float thresh, int rightTime, color col, int width) =>
+    if m15.size() > 0
+        for i = 0 to m15.size() - 1
+            FVG f15 = m15.get(i)
+            if f15.isBull == f4.isBull and f15.dispStart >= f4.dispStart and f15.dispStart < f4.dispEnd
+                for a4 = 0 to 2
+                    for a15 = 0 to 2
+                        float p4  = lvlPrice(f4,  a4)
+                        float p15 = lvlPrice(f15, a15)
+                        if not lvlDone(f4, a4) and not lvlDone(f15, a15) and math.abs(p4 - p15) <= thresh
+                            float mid = (p4 + p15) / 2.0
+                            // Arrowhead on the LEFT (points toward the lines);
+                            // tail extends `arrowLen` bars to the right.
+                            line al = line.new(x1 = rightTime, y1 = mid, x2 = rightTime + arrowLen * (timeframe.in_seconds() * 1000), y2 = mid, xloc = xloc.bar_time, color = col, width = width, style = line.style_arrow_left)
+                            arrows.push(Arrow.new(al, f4, a4, f15, a15))
+
+
+// Remove any arrow whose 4H or 15M linked level has been mitigated.
+maintainArrows(array<Arrow> arrows) =>
+    if arrows.size() > 0
+        for i = arrows.size() - 1 to 0
+            Arrow a = arrows.get(i)
+            if lvlDone(a.f4, a.lvl4) or lvlDone(a.f15, a.lvl15)
+                line.delete(a.ln)
+                arrows.remove(i)
+
+
 // ───────────────────────────── Storage ─────────────────────────────────────
-var array<FVG> fvg4h  = array.new<FVG>()
-var array<FVG> fvg15m = array.new<FVG>()
+var array<FVG>   fvg4h   = array.new<FVG>()
+var array<FVG>   fvg15m  = array.new<FVG>()
+var array<Arrow> arrows  = array.new<Arrow>()
 
 
 // ─────────────────────── Pull HTF streams ──────────────────────────────────
@@ -240,7 +299,7 @@ float n4Top  = na
 bool  n4Bull = false
 int   n4DS   = na
 int   n4DE   = na
-if show4h or showSignals
+if show4h or showSignals or showArrows
     [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h)
     new4h  := d4
     n4Bot  := b4
@@ -249,6 +308,13 @@ if show4h or showSignals
     n4DS   := ds4
     n4DE   := de4
 maintainFVG(fvg4h)
+
+// Proximity arrows: on a fresh 4H FVG, link its levels to nearby 15M levels.
+if showArrows and new4h and fvg4h.size() > 0
+    int rightT = time + extendBars * (timeframe.in_seconds() * 1000)
+    addArrows(arrows, fvg4h.last(), fvg15m, arrowThresh, rightT, arrowCol, arrowWidth)
+// Remove arrows whose linked levels have since been mitigated.
+maintainArrows(arrows)
 
 
 // ─────────────────────── Buy / Sell signal logic ───────────────────────────
