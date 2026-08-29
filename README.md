@@ -31,7 +31,7 @@ Each line extends to the right until **its own level is mitigated** (touched by 
 | Setting | Description |
 |---|---|
 | **Show 4H / 15M** | Toggle each timeframe independently |
-| **Bullish (+) / Bearish (-) color** | Direction-based line colors (default white / red) |
+| **Line colors** | Four independent color inputs — **4H Bullish (+)**, **4H Bearish (-)**, **15M Bullish (+)**, **15M Bearish (-)** — so each timeframe/direction can be styled separately (defaults: 4H white/red, 15M aqua/orange) |
 | **Line width** | Thickness of the level lines |
 | **Show Top / CE / Bottom line** | Toggle each of the three levels on/off |
 | **Max FVGs per set** | Trims oldest FVGs to keep the chart clean |

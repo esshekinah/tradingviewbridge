@@ -34,8 +34,10 @@ show15m       = input.bool(true,   "Show 15M FVGs",      group=grp2)
 tf15m         = input.timeframe("15",  "15M Timeframe",  group=grp2)
 
 grp5 = "Line & Color Settings"
-bullCol       = input.color(color.white, "Bullish (+) color", group=grp5, inline="dir")
-bearCol       = input.color(color.red,   "Bearish (-) color", group=grp5, inline="dir")
+bull4hCol     = input.color(color.white,  "4H Bullish (+) color",  group=grp5, inline="c4")
+bear4hCol     = input.color(color.red,    "4H Bearish (-) color",  group=grp5, inline="c4")
+bull15mCol    = input.color(color.aqua,   "15M Bullish (+) color", group=grp5, inline="c15")
+bear15mCol    = input.color(color.orange, "15M Bearish (-) color", group=grp5, inline="c15")
 lineWidth     = input.int(1, "Line width", minval=1, maxval=4, group=grp5)
 showTopLn     = input.bool(true, "Show Top line",    group=grp5, inline="which")
 showCELn      = input.bool(true, "Show CE line",     group=grp5, inline="which")
@@ -162,7 +164,7 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
 // Detects a new FVG on the given HTF stream and appends it to `store`, drawing
 // the Top/CE/Bottom lines and labels. `tfMs` bounds the displacement window.
 // Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for signal logic.
-detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl) =>
+detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC) =>
     bool  drawn   = false
     float newTop  = na
     float newBot  = na
@@ -185,7 +187,7 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
             newDS   := dStart
             newDE   := dEnd
 
-            color col  = bull ? bullCol : bearCol
+            color col  = bull ? bullC : bearC
             string sgn = bull ? "+" : "-"           // + bullish, - bearish
             string pfx = sgn + tfLabel + " FVG "    // e.g. "+4H FVG "
 
@@ -315,7 +317,7 @@ int ms15 = timeframe.in_seconds(tf15m) * 1000
 // candle, so the 15M FVGs that formed *during* that candle already exist in the
 // store by the time the 4H FVG is confirmed. Signals are emitted on 4H confirm.
 if show15m
-    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels)
+    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol)
 maintainFVG(fvg15m)
 
 bool  new4h  = false
@@ -325,7 +327,7 @@ bool  n4Bull = false
 int   n4DS   = na
 int   n4DE   = na
 if show4h or showSignals or showArrows
-    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h)
+    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol)
     new4h  := d4
     n4Bot  := b4
     n4Top  := t4
