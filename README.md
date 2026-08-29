@@ -62,6 +62,21 @@ Each line extends to the right until **its own level is mitigated**, then it is 
 
 Both FVGs and OBs share the same directional Wick/Body mitigation (a level freezes when price re-enters the zone from the open side).
 
+## 15M confluence filter
+
+To cut noise, **15M zones are only drawn when they sit inside a higher-timeframe zone**:
+
+- A **15M FVG** is drawn only if it **overlaps an active, same-direction HTF zone** — where "HTF zone" means *any* Weekly / Daily / 4H **FVG or OB**.
+- A **15M OB** follows the same rule — drawn only if it overlaps an active, same-direction W/D/4H FVG or OB.
+
+Details:
+
+- **Overlap** = price-range intersection (partial counts, not just full containment).
+- **Direction must match** (a bullish 15M zone only qualifies against a bullish HTF zone).
+- Only **active (unmitigated)** HTF zones count.
+- The check runs **when the 15M zone forms**, against the HTF zones that exist at that moment (non-repainting; no retroactive reveal if an HTF zone appears later).
+- Higher-timeframe (W/D/4H) FVGs and OBs are always drawn normally — the filter only gates 15M.
+
 ## Installation
 
 1. Open TradingView → **Pine Editor** (bottom panel).

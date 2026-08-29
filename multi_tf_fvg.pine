@@ -213,6 +213,20 @@ reqTFob(simple string tf) =>
 // CE (Consequent Encroachment) = midpoint of an FVG.
 ceOf(float top, float bot) => (top + bot) / 2.0
 
+// Does the price range [bot, top] overlap ANY active (unmitigated),
+// SAME-DIRECTION zone in `pool`? Overlap = partial or full price intersection.
+// Used to gate 15M FVGs/OBs so they only draw inside an HTF FVG or OB.
+// A zone counts as active while at least one of its levels is un-mitigated.
+overlapsHTF(array<FVG> pool, float bot, float top, bool isBull) =>
+    bool hit = false
+    if pool.size() > 0
+        for i = 0 to pool.size() - 1
+            FVG z = pool.get(i)
+            bool active = not (z.topDone and z.ceDone and z.botDone)
+            if active and z.isBull == isBull and bot <= z.top and z.bot <= top
+                hit := true
+    hit
+
 // Has price reached `lvl` from BELOW (rallying up into it)? Used to mitigate
 // bearish-FVG levels, which sit above and are filled when price rallies back up.
 //   Wick mode → the bar's high reaches lvl.
@@ -258,7 +272,7 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
 // Detects a new FVG on the given HTF stream and appends it to `store`, drawing
 // the Top/CE/Bottom lines and labels. `tfMs` bounds the displacement window.
 // Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for the new FVG.
-detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot) =>
+detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot, bool requireConf, array<FVG> htf) =>
     bool  drawn   = false
     float newTop  = na
     float newBot  = na
@@ -272,39 +286,43 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
             float top = bull ? ll1 : ll3
             float bot = bull ? hh3 : hh1
             float ceL = ceOf(top, bot)
-            int dStart = t2mid
-            int dEnd   = t2mid + tfMs
-            drawn   := true
-            newTop  := top
-            newBot  := bot
-            newBull := bull
-            newDS   := dStart
-            newDE   := dEnd
+            // Confluence gate: 15M zones only draw if they overlap an active,
+            // same-direction HTF zone (any W/D/4H FVG or OB) in `htf`.
+            bool passConf = requireConf ? overlapsHTF(htf, bot, top, bull) : true
+            if passConf
+                int dStart = t2mid
+                int dEnd   = t2mid + tfMs
+                drawn   := true
+                newTop  := top
+                newBot  := bot
+                newBull := bull
+                newDS   := dStart
+                newDE   := dEnd
 
-            color col  = bull ? bullC : bearC
-            string sgn = bull ? "+" : "-"           // + bullish, - bearish
-            string pfx = sgn + tfLabel + " FVG "    // e.g. "+4H FVG "
+                color col  = bull ? bullC : bearC
+                string sgn = bull ? "+" : "-"           // + bullish, - bearish
+                string pfx = sgn + tfLabel + " FVG "    // e.g. "+4H FVG "
 
-            // Pick this FVG's per-category visibility trio (bull vs bear).
-            bool shTop = bull ? bullTop : bearTop
-            bool shCE  = bull ? bullCE  : bearCE
-            bool shBot = bull ? bullBot : bearBot
+                // Pick this FVG's per-category visibility trio (bull vs bear).
+                bool shTop = bull ? bullTop : bearTop
+                bool shCE  = bull ? bullCE  : bearCE
+                bool shBot = bull ? bullBot : bearBot
 
-            [tLn, tLb] = mkLevel(t2mid, top, col, pfx + "Top",    visible and shTop, showLbl)
-            [cLn, cLb] = mkLevel(t2mid, ceL, col, pfx + "CE",     visible and shCE,  showLbl)
-            [bLn, bLb] = mkLevel(t2mid, bot, col, pfx + "Bottom", visible and shBot, showLbl)
+                [tLn, tLb] = mkLevel(t2mid, top, col, pfx + "Top",    visible and shTop, showLbl)
+                [cLn, cLb] = mkLevel(t2mid, ceL, col, pfx + "CE",     visible and shCE,  showLbl)
+                [bLn, bLb] = mkLevel(t2mid, bot, col, pfx + "Bottom", visible and shBot, showLbl)
 
-            store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
+                store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
 
-            // Trim oldest (delete its drawings).
-            if store.size() > maxFvgs
-                FVG old = store.shift()
-                line.delete(old.topLn)
-                line.delete(old.ceLn)
-                line.delete(old.botLn)
-                label.delete(old.topLbl)
-                label.delete(old.ceLbl)
-                label.delete(old.botLbl)
+                // Trim oldest (delete its drawings).
+                if store.size() > maxFvgs
+                    FVG old = store.shift()
+                    line.delete(old.topLn)
+                    line.delete(old.ceLn)
+                    line.delete(old.botLn)
+                    label.delete(old.topLbl)
+                    label.delete(old.ceLbl)
+                    label.delete(old.botLbl)
     [drawn, newBot, newTop, newBull, newDS, newDE]
 
 
@@ -314,7 +332,7 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
 // candle's close. Reuses the FVG type/store + mkLevel + maintainFVG.
 //   Bullish OB : prev bearish (pc < po) AND cc > ph  → zone = prev body
 //   Bearish OB : prev bullish (pc > po) AND cc < pl  → zone = prev body
-detectOB(array<FVG> store, float po, float pc, float ph, float pl, int pt, float cc, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot) =>
+detectOB(array<FVG> store, float po, float pc, float ph, float pl, int pt, float cc, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot, bool requireConf, array<FVG> htf) =>
     if isNew and not na(po) and not na(pc) and not na(cc)
         bool bull = (pc < po) and (cc > ph)   // prev bearish, current closes above prev high
         bool bear = (pc > po) and (cc < pl)   // prev bullish, current closes below prev low
@@ -323,31 +341,35 @@ detectOB(array<FVG> store, float po, float pc, float ph, float pl, int pt, float
             float top = math.max(po, pc)
             float bot = math.min(po, pc)
             float ceL = ceOf(top, bot)
-            int dStart = pt
-            int dEnd   = pt + tfMs
+            // Confluence gate: 15M OBs only draw if they overlap an active,
+            // same-direction HTF zone (any W/D/4H FVG or OB) in `htf`.
+            bool passConf = requireConf ? overlapsHTF(htf, bot, top, bull) : true
+            if passConf
+                int dStart = pt
+                int dEnd   = pt + tfMs
 
-            color col  = bull ? bullC : bearC
-            string sgn = bull ? "+" : "-"
-            string pfx = sgn + tfLabel + " OB "    // e.g. "+4H OB "
+                color col  = bull ? bullC : bearC
+                string sgn = bull ? "+" : "-"
+                string pfx = sgn + tfLabel + " OB "    // e.g. "+4H OB "
 
-            bool shTop = bull ? bullTop : bearTop
-            bool shCE  = bull ? bullCE  : bearCE
-            bool shBot = bull ? bullBot : bearBot
+                bool shTop = bull ? bullTop : bearTop
+                bool shCE  = bull ? bullCE  : bearCE
+                bool shBot = bull ? bullBot : bearBot
 
-            [tLn, tLb] = mkLevel(pt, top, col, pfx + "Top",    visible and shTop, showLbl)
-            [cLn, cLb] = mkLevel(pt, ceL, col, pfx + "CE",     visible and shCE,  showLbl)
-            [bLn, bLb] = mkLevel(pt, bot, col, pfx + "Bottom", visible and shBot, showLbl)
+                [tLn, tLb] = mkLevel(pt, top, col, pfx + "Top",    visible and shTop, showLbl)
+                [cLn, cLb] = mkLevel(pt, ceL, col, pfx + "CE",     visible and shCE,  showLbl)
+                [bLn, bLb] = mkLevel(pt, bot, col, pfx + "Bottom", visible and shBot, showLbl)
 
-            store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
+                store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
 
-            if store.size() > maxFvgs
-                FVG old = store.shift()
-                line.delete(old.topLn)
-                line.delete(old.ceLn)
-                line.delete(old.botLn)
-                label.delete(old.topLbl)
-                label.delete(old.ceLbl)
-                label.delete(old.botLbl)
+                if store.size() > maxFvgs
+                    FVG old = store.shift()
+                    line.delete(old.topLn)
+                    line.delete(old.ceLn)
+                    line.delete(old.botLn)
+                    label.delete(old.topLbl)
+                    label.delete(old.ceLbl)
+                    label.delete(old.botLbl)
     true
 
 
@@ -441,42 +463,55 @@ int ms15 = timeframe.in_seconds(tf15m) * 1000
 
 
 // ─────────────────────────── Run detection ─────────────────────────────────
-if show15m
-    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol, s15BullTop, s15BullCE, s15BullBot, s15BearTop, s15BearCE, s15BearBot)
-maintainFVG(fvg15m)
+// IMPORTANT ORDER: detect ALL higher-timeframe (W/D/4H) FVGs and OBs FIRST, so
+// the 15M confluence filter can check overlap against the HTF zones that exist
+// at the moment a 15M zone forms. `noConf` = empty pool for the HTF calls
+// (they are never gated).
+var array<FVG> noConf = array.new<FVG>()
 
-// Weekly.
+// ── Higher-timeframe FVGs ──
 if showW
-    detectFVG(fvgW, H1_W, L1_W, H3_W, L3_W, T2_W, msW, isNewW, "W", showW, showLabels and showW, bullWCol, bearWCol, sWBullTop, sWBullCE, sWBullBot, sWBearTop, sWBearCE, sWBearBot)
+    detectFVG(fvgW, H1_W, L1_W, H3_W, L3_W, T2_W, msW, isNewW, "W", showW, showLabels and showW, bullWCol, bearWCol, sWBullTop, sWBullCE, sWBullBot, sWBearTop, sWBearCE, sWBearBot, false, noConf)
 maintainFVG(fvgW)
 
-// Daily.
 if showD
-    detectFVG(fvgD, H1_D, L1_D, H3_D, L3_D, T2_D, msD, isNewD, "D", showD, showLabels and showD, bullDCol, bearDCol, sDBullTop, sDBullCE, sDBullBot, sDBearTop, sDBearCE, sDBearBot)
+    detectFVG(fvgD, H1_D, L1_D, H3_D, L3_D, T2_D, msD, isNewD, "D", showD, showLabels and showD, bullDCol, bearDCol, sDBullTop, sDBullCE, sDBullBot, sDBearTop, sDBearCE, sDBearBot, false, noConf)
 maintainFVG(fvgD)
 
-// 4H.
 if show4h
-    detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol, s4hBullTop, s4hBullCE, s4hBullBot, s4hBearTop, s4hBearCE, s4hBearBot)
+    detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol, s4hBullTop, s4hBullCE, s4hBullBot, s4hBearTop, s4hBearCE, s4hBearBot, false, noConf)
 maintainFVG(fvg4h)
 
-
-// ─────────────────────────── Order Block detection ─────────────────────────
-if show15mOB
-    detectOB(ob15m, oPO_15, oPC_15, oPH_15, oPL_15, oPT_15, oCC_15, ms15, obNew15, "15M", true, showLabels, obBull15mCol, obBear15mCol, o15BullTop, o15BullCE, o15BullBot, o15BearTop, o15BearCE, o15BearBot)
-maintainFVG(ob15m)
-
+// ── Higher-timeframe OBs ──
 if showWOB
-    detectOB(obW, oPO_W, oPC_W, oPH_W, oPL_W, oPT_W, oCC_W, msW, obNewW, "W", showWOB, showLabels and showWOB, obBullWCol, obBearWCol, oWBullTop, oWBullCE, oWBullBot, oWBearTop, oWBearCE, oWBearBot)
+    detectOB(obW, oPO_W, oPC_W, oPH_W, oPL_W, oPT_W, oCC_W, msW, obNewW, "W", showWOB, showLabels and showWOB, obBullWCol, obBearWCol, oWBullTop, oWBullCE, oWBullBot, oWBearTop, oWBearCE, oWBearBot, false, noConf)
 maintainFVG(obW)
 
 if showDOB
-    detectOB(obD, oPO_D, oPC_D, oPH_D, oPL_D, oPT_D, oCC_D, msD, obNewD, "D", showDOB, showLabels and showDOB, obBullDCol, obBearDCol, oDBullTop, oDBullCE, oDBullBot, oDBearTop, oDBearCE, oDBearBot)
+    detectOB(obD, oPO_D, oPC_D, oPH_D, oPL_D, oPT_D, oCC_D, msD, obNewD, "D", showDOB, showLabels and showDOB, obBullDCol, obBearDCol, oDBullTop, oDBullCE, oDBullBot, oDBearTop, oDBearCE, oDBearBot, false, noConf)
 maintainFVG(obD)
 
 if show4hOB
-    detectOB(ob4h, oPO_4h, oPC_4h, oPH_4h, oPL_4h, oPT_4h, oCC_4h, ms4h, obNew4h, "4H", show4hOB, showLabels and show4hOB, obBull4hCol, obBear4hCol, o4hBullTop, o4hBullCE, o4hBullBot, o4hBearTop, o4hBearCE, o4hBearBot)
+    detectOB(ob4h, oPO_4h, oPC_4h, oPH_4h, oPL_4h, oPT_4h, oCC_4h, ms4h, obNew4h, "4H", show4hOB, showLabels and show4hOB, obBull4hCol, obBear4hCol, o4hBullTop, o4hBullCE, o4hBullBot, o4hBearTop, o4hBearCE, o4hBearBot, false, noConf)
 maintainFVG(ob4h)
+
+// ── Combined active HTF pool (all W/D/4H FVGs + OBs) for the 15M filter ──
+htfPool = array.new<FVG>()
+htfPool.concat(fvgW)
+htfPool.concat(fvgD)
+htfPool.concat(fvg4h)
+htfPool.concat(obW)
+htfPool.concat(obD)
+htfPool.concat(ob4h)
+
+// ── 15M FVG + OB, gated: only drawn if they overlap a same-direction HTF zone ──
+if show15m
+    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol, s15BullTop, s15BullCE, s15BullBot, s15BearTop, s15BearCE, s15BearBot, true, htfPool)
+maintainFVG(fvg15m)
+
+if show15mOB
+    detectOB(ob15m, oPO_15, oPC_15, oPH_15, oPL_15, oPT_15, oCC_15, ms15, obNew15, "15M", true, showLabels, obBull15mCol, obBear15mCol, o15BullTop, o15BullCE, o15BullBot, o15BearTop, o15BearCE, o15BearBot, true, htfPool)
+maintainFVG(ob15m)
 
 
 // ─────────────────────────── Dashboard (legend) ────────────────────────────
