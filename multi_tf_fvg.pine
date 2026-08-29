@@ -39,10 +39,28 @@ bear4hCol     = input.color(color.red,    "4H Bearish (-) color",  group=grp5, i
 bull15mCol    = input.color(color.aqua,   "15M Bullish (+) color", group=grp5, inline="c15")
 bear15mCol    = input.color(color.orange, "15M Bearish (-) color", group=grp5, inline="c15")
 lineWidth     = input.int(1, "Line width", minval=1, maxval=4, group=grp5)
-showTopLn     = input.bool(true, "Show Top line",    group=grp5, inline="which")
-showCELn      = input.bool(true, "Show CE line",     group=grp5, inline="which")
-showBotLn     = input.bool(true, "Show Bottom line", group=grp5, inline="which")
 mitModeInp    = input.string("Wick", "Mitigation by", options=["Wick","Body"], group=grp5, tooltip="A level freezes only when price RE-ENTERS the gap from the correct side. Wick = the candle wick reaching the level (high/low); Body = the candle body reaching it (open/close).")
+
+// Per-category line visibility: {4H,15M} x {Bull,Bear} x {Top,CE,Bottom}.
+grp8 = "Show/Hide Lines — 4H Bullish (+)"
+s4hBullTop = input.bool(true, "Top",    group=grp8, inline="r")
+s4hBullCE  = input.bool(true, "CE",     group=grp8, inline="r")
+s4hBullBot = input.bool(true, "Bottom", group=grp8, inline="r")
+
+grp9 = "Show/Hide Lines — 4H Bearish (-)"
+s4hBearTop = input.bool(true, "Top",    group=grp9, inline="r")
+s4hBearCE  = input.bool(true, "CE",     group=grp9, inline="r")
+s4hBearBot = input.bool(true, "Bottom", group=grp9, inline="r")
+
+grp10 = "Show/Hide Lines — 15M Bullish (+)"
+s15BullTop = input.bool(true, "Top",    group=grp10, inline="r")
+s15BullCE  = input.bool(true, "CE",     group=grp10, inline="r")
+s15BullBot = input.bool(true, "Bottom", group=grp10, inline="r")
+
+grp11 = "Show/Hide Lines — 15M Bearish (-)"
+s15BearTop = input.bool(true, "Top",    group=grp11, inline="r")
+s15BearCE  = input.bool(true, "CE",     group=grp11, inline="r")
+s15BearBot = input.bool(true, "Bottom", group=grp11, inline="r")
 
 grp6 = "Proximity Arrow"
 showArrows    = input.bool(true, "Show proximity arrows", group=grp6, tooltip="Draw a red left-pointing arrow whenever any 4H level (Top/CE/Bottom) is within the threshold of any same-direction 15M level. The arrow is removed if either linked level is mitigated.")
@@ -165,7 +183,7 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
 // Detects a new FVG on the given HTF stream and appends it to `store`, drawing
 // the Top/CE/Bottom lines and labels. `tfMs` bounds the displacement window.
 // Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for the new FVG.
-detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC) =>
+detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot) =>
     bool  drawn   = false
     float newTop  = na
     float newBot  = na
@@ -192,9 +210,14 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
             string sgn = bull ? "+" : "-"           // + bullish, - bearish
             string pfx = sgn + tfLabel + " FVG "    // e.g. "+4H FVG "
 
-            [tLn, tLb] = mkLevel(t2mid, top, col, pfx + "Top",    visible and showTopLn, showLbl)
-            [cLn, cLb] = mkLevel(t2mid, ceL, col, pfx + "CE",     visible and showCELn,  showLbl)
-            [bLn, bLb] = mkLevel(t2mid, bot, col, pfx + "Bottom", visible and showBotLn, showLbl)
+            // Pick this FVG's per-category visibility trio (bull vs bear).
+            bool shTop = bull ? bullTop : bearTop
+            bool shCE  = bull ? bullCE  : bearCE
+            bool shBot = bull ? bullBot : bearBot
+
+            [tLn, tLb] = mkLevel(t2mid, top, col, pfx + "Top",    visible and shTop, showLbl)
+            [cLn, cLb] = mkLevel(t2mid, ceL, col, pfx + "CE",     visible and shCE,  showLbl)
+            [bLn, bLb] = mkLevel(t2mid, bot, col, pfx + "Bottom", visible and shBot, showLbl)
 
             store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
 
@@ -322,12 +345,12 @@ int ms15 = timeframe.in_seconds(tf15m) * 1000
 // candle, so the 15M FVGs that formed *during* that candle already exist in the
 // store by the time the 4H FVG is confirmed (used by the proximity arrows).
 if show15m
-    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol)
+    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol, s15BullTop, s15BullCE, s15BullBot, s15BearTop, s15BearCE, s15BearBot)
 maintainFVG(fvg15m)
 
 bool new4h = false
 if show4h or showArrows
-    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol)
+    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol, s4hBullTop, s4hBullCE, s4hBullBot, s4hBearTop, s4hBearCE, s4hBearBot)
     new4h := d4
 maintainFVG(fvg4h)
 
