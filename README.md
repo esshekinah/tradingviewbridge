@@ -22,7 +22,7 @@ An FVG (a.k.a. imbalance) is a classic 3-candle pattern representing an untraded
 | **Max FVGs per set** | Trims oldest gaps to keep the chart clean |
 | **Extend boxes** | How far right each gap box projects |
 | **Remove when filled** | Auto-deletes a gap once price fully mitigates it |
-| **Labels** | Tags each box as "4H Bull FVG", "15M Bear FVG", etc. |
+| **Labels** | Tags each box as "4H Bull FVG", "15M Bear FVG", etc. Configurable **horizontal position** (Left / Center / **Right**, default Right so the text sits at the far-right end of the box), **vertical position** (Top / Center / Bottom), **text size** (Tiny / Small / Normal / Large), and **text color** |
 | **Alerts** | Built-in `alertcondition` fires when a new 4H or 15M FVG forms |
 
 The timeframes are configurable inputs, so you can repurpose the indicator for any two timeframes (e.g. Daily + 1H) without editing code.

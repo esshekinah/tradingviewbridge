@@ -42,6 +42,10 @@ maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100,
 extendBars    = input.int(30,  "Extend boxes (bars)",      minval=0, maxval=500, group=grp4)
 removeFilled  = input.bool(true, "Remove FVG when filled (mitigated)", group=grp4)
 showLabels    = input.bool(true, "Show timeframe labels",   group=grp4)
+lblHAlignInp  = input.string("Right",  "Label horizontal position", options=["Left","Center","Right"], group=grp4)
+lblVAlignInp  = input.string("Center", "Label vertical position",   options=["Top","Center","Bottom"], group=grp4)
+lblSizeInp    = input.string("Tiny",   "Label text size", options=["Tiny","Small","Normal","Large"], group=grp4)
+lblColor      = input.color(color.new(color.gray, 20), "Label text color", group=grp4)
 borderWidth   = input.int(1,   "Border width", minval=0, maxval=4, group=grp4)
 ceStyleInp    = input.string("Dashed", "CE line style", options=["Solid","Dashed","Dotted"], group=grp4)
 ceWidth       = input.int(1,   "CE line width", minval=1, maxval=4, group=grp4)
@@ -75,6 +79,14 @@ ce(float top, float bot) => (top + bot) / 2.0
 // Map the CE line-style input string to a Pine line style constant.
 ceStyle() =>
     ceStyleInp == "Solid"  ? line.style_solid  : ceStyleInp == "Dotted" ? line.style_dotted : line.style_dashed
+
+// Map label-position / size input strings to Pine constants.
+lblHAlign() =>
+    lblHAlignInp == "Left" ? text.align_left : lblHAlignInp == "Center" ? text.align_center : text.align_right
+lblVAlign() =>
+    lblVAlignInp == "Top" ? text.align_top : lblVAlignInp == "Bottom" ? text.align_bottom : text.align_center
+lblSize() =>
+    lblSizeInp == "Small" ? size.small : lblSizeInp == "Normal" ? size.normal : lblSizeInp == "Large" ? size.large : size.tiny
 
 
 // Returns true if the given 4H FVG levels are within `thresh` price points of
@@ -135,10 +147,10 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
             box b = box.new(left = t2mid, top = top, right = t2mid + 1, bottom = bot, xloc = xloc.bar_time, border_color = bordCol, border_width = borderWidth, bgcolor = bgCol)
             if showLbl
                 box.set_text(b, tfLabel + (bull ? " Bull FVG" : " Bear FVG"))
-                box.set_text_size(b, size.tiny)
-                box.set_text_color(b, color.new(color.gray, 20))
-                box.set_text_halign(b, text.align_left)
-                box.set_text_valign(b, text.align_center)
+                box.set_text_size(b, lblSize())
+                box.set_text_color(b, lblColor)
+                box.set_text_halign(b, lblHAlign())
+                box.set_text_valign(b, lblVAlign())
             // CE (midpoint) line spanning the FVG box.
             line ceLine = na
             if visible and showCE
