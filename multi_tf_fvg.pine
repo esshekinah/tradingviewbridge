@@ -258,13 +258,17 @@ dashSize() =>
 
 
 // Create one horizontal level line + right-end label. Returns [line, label].
-mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
+mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl, int tfMs) =>
     line  ln = na
     label lb = na
     if show
-        ln := line.new(x1 = t2mid, y1 = lvl, x2 = t2mid + 1, y2 = lvl, xloc = xloc.bar_time, color = col, style = line.style_solid, width = lineWidth)
+        // Right edge starts one full HTF bar past the start so the line has a
+        // visible width even before maintainFVG extends it (a +1ms width can
+        // render as an invisible zero-length line on lower chart timeframes).
+        int x2 = t2mid + tfMs
+        ln := line.new(x1 = t2mid, y1 = lvl, x2 = x2, y2 = lvl, xloc = xloc.bar_time, color = col, style = line.style_solid, width = lineWidth)
         if showLbl
-            lb := label.new(x = t2mid + 1, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_label_left, size = lblSize(), text_font_family = lblFont())
+            lb := label.new(x = x2, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_label_left, size = lblSize(), text_font_family = lblFont())
     [ln, lb]
 
 
@@ -308,9 +312,9 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
                 bool shCE  = bull ? bullCE  : bearCE
                 bool shBot = bull ? bullBot : bearBot
 
-                [tLn, tLb] = mkLevel(t2mid, top, col, pfx + "Top",    visible and shTop, showLbl)
-                [cLn, cLb] = mkLevel(t2mid, ceL, col, pfx + "CE",     visible and shCE,  showLbl)
-                [bLn, bLb] = mkLevel(t2mid, bot, col, pfx + "Bottom", visible and shBot, showLbl)
+                [tLn, tLb] = mkLevel(t2mid, top, col, pfx + "Top",    visible and shTop, showLbl, tfMs)
+                [cLn, cLb] = mkLevel(t2mid, ceL, col, pfx + "CE",     visible and shCE,  showLbl, tfMs)
+                [bLn, bLb] = mkLevel(t2mid, bot, col, pfx + "Bottom", visible and shBot, showLbl, tfMs)
 
                 store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
 
@@ -356,9 +360,9 @@ detectOB(array<FVG> store, float po, float pc, float ph, float pl, int pt, float
                 bool shCE  = bull ? bullCE  : bearCE
                 bool shBot = bull ? bullBot : bearBot
 
-                [tLn, tLb] = mkLevel(pt, top, col, pfx + "Top",    visible and shTop, showLbl)
-                [cLn, cLb] = mkLevel(pt, ceL, col, pfx + "CE",     visible and shCE,  showLbl)
-                [bLn, bLb] = mkLevel(pt, bot, col, pfx + "Bottom", visible and shBot, showLbl)
+                [tLn, tLb] = mkLevel(pt, top, col, pfx + "Top",    visible and shTop, showLbl, tfMs)
+                [cLn, cLb] = mkLevel(pt, ceL, col, pfx + "CE",     visible and shCE,  showLbl, tfMs)
+                [bLn, bLb] = mkLevel(pt, bot, col, pfx + "Bottom", visible and shBot, showLbl, tfMs)
 
                 store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
 
@@ -388,20 +392,28 @@ maintainFVG(array<FVG> store) =>
             // On mitigation, freeze the line's right edge at THIS bar's time so
             // it ends exactly where price re-entered it.
 
+            // Minimum right edge so a line/label is NEVER at or behind its own
+            // start (x1 = dispStart). f.dispEnd = dispStart + one HTF bar (ms),
+            // guaranteeing x2 > x1 by at least one HTF bar. Without this, on a
+            // low chart TF the frozen/initial x2 can land <= x1, producing a
+            // zero-length or backwards line that TradingView renders invisible.
+            int frozenX  = math.max(time, f.dispEnd)
+            int activeX  = math.max(newRight, f.dispEnd)
+
             // Top level.
             if not f.topDone
                 bool hitTop = f.isBull ? reachedFromAbove(f.top) : reachedFromBelow(f.top)
                 if hitTop
                     f.topDone := true
                     if not na(f.topLn)
-                        line.set_x2(f.topLn, time)
+                        line.set_x2(f.topLn, frozenX)
                         if not na(f.topLbl)
-                            label.set_x(f.topLbl, time)
+                            label.set_x(f.topLbl, frozenX)
                 else if not na(f.topLn)
-                    line.set_x2(f.topLn, newRight)
+                    line.set_x2(f.topLn, activeX)
                     // Label floats at the latest real bar so it stays visible.
                     if not na(f.topLbl)
-                        label.set_x(f.topLbl, time)
+                        label.set_x(f.topLbl, activeX)
 
             // Bottom level.
             if not f.botDone
@@ -409,13 +421,13 @@ maintainFVG(array<FVG> store) =>
                 if hitBot
                     f.botDone := true
                     if not na(f.botLn)
-                        line.set_x2(f.botLn, time)
+                        line.set_x2(f.botLn, frozenX)
                         if not na(f.botLbl)
-                            label.set_x(f.botLbl, time)
+                            label.set_x(f.botLbl, frozenX)
                 else if not na(f.botLn)
-                    line.set_x2(f.botLn, newRight)
+                    line.set_x2(f.botLn, activeX)
                     if not na(f.botLbl)
-                        label.set_x(f.botLbl, time)
+                        label.set_x(f.botLbl, activeX)
 
             // CE (midpoint) level.
             if not f.ceDone
@@ -423,13 +435,13 @@ maintainFVG(array<FVG> store) =>
                 if hitCE
                     f.ceDone := true
                     if not na(f.ceLn)
-                        line.set_x2(f.ceLn, time)
+                        line.set_x2(f.ceLn, frozenX)
                         if not na(f.ceLbl)
-                            label.set_x(f.ceLbl, time)
+                            label.set_x(f.ceLbl, frozenX)
                 else if not na(f.ceLn)
-                    line.set_x2(f.ceLn, newRight)
+                    line.set_x2(f.ceLn, activeX)
                     if not na(f.ceLbl)
-                        label.set_x(f.ceLbl, time)
+                        label.set_x(f.ceLbl, activeX)
     true
 
 
