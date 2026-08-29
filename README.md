@@ -36,7 +36,7 @@ Each line extends to the right until **its own level is mitigated** (touched by 
 | **Show Top / CE / Bottom line** | Toggle each of the three levels on/off |
 | **Max FVGs per set** | Trims oldest FVGs to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
-| **Show text labels** | Toggle the right-end labels; configurable **text size** (Tiny / Small / Normal / Large) |
+| **Show text labels** | Toggle the right-end labels; configurable **text size** (Tiny / Small / Normal / Large) and **font** (Default / Monospace — Pine Script only supports these two families; a true Arial is not available, but Default is TradingView's Arial-like sans-serif) |
 | **Alerts** | Built-in `alertcondition` fires for new 4H / 15M FVGs and Buy/Sell signals |
 
 The timeframes are configurable inputs, so you can repurpose the indicator for any two timeframes (e.g. Daily + 1H) without editing code.
