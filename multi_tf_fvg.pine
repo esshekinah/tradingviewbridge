@@ -43,12 +43,6 @@ showTopLn     = input.bool(true, "Show Top line",    group=grp5, inline="which")
 showCELn      = input.bool(true, "Show CE line",     group=grp5, inline="which")
 showBotLn     = input.bool(true, "Show Bottom line", group=grp5, inline="which")
 
-grp3 = "Signal Settings"
-showSignals   = input.bool(true, "Show Buy/Sell signals", group=grp3)
-signalThresh  = input.float(4.0, "Max line distance (price points)", minval=0.0, step=0.1, group=grp3, tooltip="A signal fires when a same-direction 15M FVG formed DURING the 4H displacement candle AND any 4H level (Bottom/CE/Top) is within this many price points of any 15M level. Set to match the instrument's scale — e.g. ~4 on an index like US Tech 100.")
-buySigCol     = input.color(color.lime, "Buy signal",  group=grp3, inline="sig")
-sellSigCol    = input.color(color.red,  "Sell signal", group=grp3, inline="sig")
-
 grp6 = "Proximity Arrow"
 showArrows    = input.bool(true, "Show proximity arrows", group=grp6, tooltip="Draw a red left-pointing arrow whenever any 4H level (Top/CE/Bottom) is within the threshold of any same-direction 15M level. The arrow is removed if either linked level is mitigated.")
 arrowThresh   = input.float(4.0, "Arrow max distance (points)", minval=0.0, step=0.1, group=grp6)
@@ -132,27 +126,6 @@ dashSize() =>
     dashSizeInp == "Tiny" ? size.tiny : dashSizeInp == "Normal" ? size.normal : dashSizeInp == "Large" ? size.large : size.small
 
 
-// Returns true if the given 4H FVG levels are within `thresh` price points of
-// the given 15M FVG levels (any of the 9 Bottom/CE/Top line-to-line distances).
-levelsNear(float bot4, float ce4, float top4, float bot15, float ce15, float top15, float thresh) =>
-    math.abs(bot4 - bot15) <= thresh or math.abs(bot4 - ce15) <= thresh or math.abs(bot4 - top15) <= thresh or math.abs(ce4 - bot15) <= thresh or math.abs(ce4 - ce15) <= thresh or math.abs(ce4 - top15) <= thresh or math.abs(top4 - bot15) <= thresh or math.abs(top4 - ce15) <= thresh or math.abs(top4 - top15) <= thresh
-
-
-// When a 4H FVG has just confirmed, scan the stored 15M FVGs and return true if
-// ANY same-direction 15M FVG (a) formed DURING this 4H FVG's displacement candle
-// window and (b) has a level within `thresh` price points of a 4H level.
-signalOn4hConfirm(array<FVG> m15, float bot4, float top4, int dStart, int dEnd, bool isBull, float thresh) =>
-    bool hit = false
-    if m15.size() > 0
-        float ce4 = ceOf(top4, bot4)
-        for i = 0 to m15.size() - 1
-            FVG f = m15.get(i)
-            if f.isBull == isBull and f.dispStart >= dStart and f.dispStart < dEnd
-                if levelsNear(bot4, ce4, top4, f.bot, f.ce, f.top, thresh)
-                    hit := true
-    hit
-
-
 // Price of a level by index: 0 = Top, 1 = CE, 2 = Bottom.
 lvlPrice(FVG f, int idx) =>
     idx == 0 ? f.top : idx == 1 ? f.ce : f.bot
@@ -176,7 +149,7 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
 // ─────────────────────── FVG detection + drawing ───────────────────────────
 // Detects a new FVG on the given HTF stream and appends it to `store`, drawing
 // the Top/CE/Bottom lines and labels. `tfMs` bounds the displacement window.
-// Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for signal logic.
+// Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for the new FVG.
 detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC) =>
     bool  drawn   = false
     float newTop  = na
@@ -328,25 +301,15 @@ int ms15 = timeframe.in_seconds(tf15m) * 1000
 // ─────────────────────────── Run detection ─────────────────────────────────
 // Detect and store 15M FVGs FIRST. A 4H FVG confirms ~8h after its displacement
 // candle, so the 15M FVGs that formed *during* that candle already exist in the
-// store by the time the 4H FVG is confirmed. Signals are emitted on 4H confirm.
+// store by the time the 4H FVG is confirmed (used by the proximity arrows).
 if show15m
     detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol)
 maintainFVG(fvg15m)
 
-bool  new4h  = false
-float n4Bot  = na
-float n4Top  = na
-bool  n4Bull = false
-int   n4DS   = na
-int   n4DE   = na
-if show4h or showSignals or showArrows
+bool new4h = false
+if show4h or showArrows
     [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol)
-    new4h  := d4
-    n4Bot  := b4
-    n4Top  := t4
-    n4Bull := bull4
-    n4DS   := ds4
-    n4DE   := de4
+    new4h := d4
 maintainFVG(fvg4h)
 
 // Proximity arrows: on a fresh 4H FVG, link its levels to nearby 15M levels.
@@ -357,23 +320,6 @@ if showArrows and new4h and fvg4h.size() > 0
 maintainArrows(arrows)
 
 
-// ─────────────────────── Buy / Sell signal logic ───────────────────────────
-// When a 4H FVG confirms, scan stored 15M FVGs. If any SAME-DIRECTION 15M FVG
-// (a) formed DURING this 4H FVG's displacement candle window, and (b) has a
-// level (Bottom / CE / Top) within `signalThresh` price points of a 4H level,
-// fire a signal: Buy → bullish pair, Sell → bearish pair.
-bool buySignal  = false
-bool sellSignal = false
-if showSignals and new4h and not na(n4Bot)
-    bool aligned = signalOn4hConfirm(fvg15m, n4Bot, n4Top, n4DS, n4DE, n4Bull, signalThresh)
-    if aligned
-        buySignal  := n4Bull
-        sellSignal := not n4Bull
-
-plotshape(buySignal,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=buySigCol,  size=size.small, text="BUY",  textcolor=buySigCol)
-plotshape(sellSignal, title="Sell", style=shape.triangledown, location=location.abovebar, color=sellSigCol, size=size.small, text="SELL", textcolor=sellSigCol)
-
-
 // ─────────────────────────── Dashboard (legend) ────────────────────────────
 // A small color legend explaining what each line/marker color means. Built
 // once on the last bar for efficiency; rebuilt if inputs change.
@@ -381,7 +327,7 @@ var table dash = na
 if showDash and barstate.islast
     if not na(dash)
         table.delete(dash)
-    dash := table.new(position = dashPos(), columns = 2, rows = 8, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
+    dash := table.new(position = dashPos(), columns = 2, rows = 6, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
 
     // Header
     table.cell(dash, 0, 0, "FVG Legend", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
@@ -396,16 +342,10 @@ if showDash and barstate.islast
     table.cell(dash, 1, 3, "+15M FVG (bullish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
     table.cell(dash, 0, 4, "  ", bgcolor = bear15mCol)
     table.cell(dash, 1, 4, "-15M FVG (bearish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 5, "  ", bgcolor = buySigCol)
-    table.cell(dash, 1, 5, "Buy signal",       text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 6, "  ", bgcolor = sellSigCol)
-    table.cell(dash, 1, 6, "Sell signal",      text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 7, "  ", bgcolor = arrowCol)
-    table.cell(dash, 1, 7, "Proximity arrow",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 5, "  ", bgcolor = arrowCol)
+    table.cell(dash, 1, 5, "Proximity arrow",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
 
 
 // ───────────────────────────── Alerts ──────────────────────────────────────
 alertcondition(isNew4h and show4h,  "New 4H FVG",  "A new 4H Fair Value Gap has formed")
 alertcondition(isNew15 and show15m, "New 15M FVG", "A new 15M Fair Value Gap has formed")
-alertcondition(buySignal,           "Buy Signal",  "4H+15M FVG confluence during formation - BUY")
-alertcondition(sellSignal,          "Sell Signal", "4H+15M FVG confluence during formation - SELL")
