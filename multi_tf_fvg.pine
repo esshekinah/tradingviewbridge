@@ -1,22 +1,24 @@
 //@version=5
-indicator("Multi-TF FVG (4H + 15M)", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("Multi-TF FVG (W + D + 4H + 15M)", overlay=true, max_lines_count=500, max_labels_count=500)
 
 // ============================================================================
 // Multi-Timeframe Fair Value Gap (FVG) Indicator
 // ----------------------------------------------------------------------------
-// Detects Fair Value Gaps on the 4H and 15M timeframes and draws them on
-// ANY chart timeframe you are currently viewing.
+// Detects Fair Value Gaps on the Weekly, Daily, 4H and 15M timeframes and
+// draws them on ANY chart timeframe you are currently viewing.
 //
 // An FVG (a.k.a. imbalance) is a 3-candle pattern:
 //   Bullish FVG : low of candle[1]  >  high of candle[3]   (gap between them)
 //   Bearish FVG : high of candle[1] <  low  of candle[3]   (gap between them)
 //
 // Each FVG is drawn as THREE horizontal lines — Top, CE (midpoint), Bottom —
-// each with a text label at its right end:
-//   +4H FVG Top / CE / Bottom     ( + = bullish, white )
-//   -4H FVG Top / CE / Bottom     ( - = bearish, red   )
-//   +15M FVG Top / CE / Bottom
+// each with a text label at its right end, e.g.:
+//   +W FVG Top / CE / Bottom      ( + = bullish )
+//   -D FVG Top / CE / Bottom      ( - = bearish )
+//   +4H FVG Top / CE / Bottom
 //   -15M FVG Top / CE / Bottom
+//
+// Proximity arrows compare Weekly / Daily / 4H levels against 15M levels.
 //
 // Each line extends to the right until its own level is mitigated (touched by
 // price), at which point the line is discontinued — frozen at the bar where
@@ -25,6 +27,14 @@ indicator("Multi-TF FVG (4H + 15M)", overlay=true, max_lines_count=500, max_labe
 
 
 // ─────────────────────────────── Inputs ────────────────────────────────────
+grpW = "Weekly FVG Settings"
+showW         = input.bool(true,   "Show Weekly FVGs",   group=grpW)
+tfW           = input.timeframe("W",   "Weekly Timeframe", group=grpW)
+
+grpD = "Daily FVG Settings"
+showD         = input.bool(true,   "Show Daily FVGs",    group=grpD)
+tfD           = input.timeframe("D",   "Daily Timeframe",  group=grpD)
+
 grp1 = "4H FVG Settings"
 show4h        = input.bool(true,   "Show 4H FVGs",       group=grp1)
 tf4h          = input.timeframe("240", "4H Timeframe",   group=grp1)
@@ -34,6 +44,10 @@ show15m       = input.bool(true,   "Show 15M FVGs",      group=grp2)
 tf15m         = input.timeframe("15",  "15M Timeframe",  group=grp2)
 
 grp5 = "Line & Color Settings"
+bullWCol      = input.color(color.yellow, "Weekly Bullish (+) color", group=grp5, inline="cw")
+bearWCol      = input.color(color.fuchsia,"Weekly Bearish (-) color", group=grp5, inline="cw")
+bullDCol      = input.color(color.lime,   "Daily Bullish (+) color",  group=grp5, inline="cd")
+bearDCol      = input.color(color.maroon, "Daily Bearish (-) color",  group=grp5, inline="cd")
 bull4hCol     = input.color(color.white,  "4H Bullish (+) color",  group=grp5, inline="c4")
 bear4hCol     = input.color(color.red,    "4H Bearish (-) color",  group=grp5, inline="c4")
 bull15mCol    = input.color(color.aqua,   "15M Bullish (+) color", group=grp5, inline="c15")
@@ -41,7 +55,27 @@ bear15mCol    = input.color(color.orange, "15M Bearish (-) color", group=grp5, i
 lineWidth     = input.int(1, "Line width", minval=1, maxval=4, group=grp5)
 mitModeInp    = input.string("Wick", "Mitigation by", options=["Wick","Body"], group=grp5, tooltip="A level freezes only when price RE-ENTERS the gap from the correct side. Wick = the candle wick reaching the level (high/low); Body = the candle body reaching it (open/close).")
 
-// Per-category line visibility: {4H,15M} x {Bull,Bear} x {Top,CE,Bottom}.
+// Per-category line visibility: {W,D,4H,15M} x {Bull,Bear} x {Top,CE,Bottom}.
+grpWB = "Show/Hide Lines — Weekly Bullish (+)"
+sWBullTop = input.bool(true, "Top",    group=grpWB, inline="r")
+sWBullCE  = input.bool(true, "CE",     group=grpWB, inline="r")
+sWBullBot = input.bool(true, "Bottom", group=grpWB, inline="r")
+
+grpWS = "Show/Hide Lines — Weekly Bearish (-)"
+sWBearTop = input.bool(true, "Top",    group=grpWS, inline="r")
+sWBearCE  = input.bool(true, "CE",     group=grpWS, inline="r")
+sWBearBot = input.bool(true, "Bottom", group=grpWS, inline="r")
+
+grpDB = "Show/Hide Lines — Daily Bullish (+)"
+sDBullTop = input.bool(true, "Top",    group=grpDB, inline="r")
+sDBullCE  = input.bool(true, "CE",     group=grpDB, inline="r")
+sDBullBot = input.bool(true, "Bottom", group=grpDB, inline="r")
+
+grpDS = "Show/Hide Lines — Daily Bearish (-)"
+sDBearTop = input.bool(true, "Top",    group=grpDS, inline="r")
+sDBearCE  = input.bool(true, "CE",     group=grpDS, inline="r")
+sDBearBot = input.bool(true, "Bottom", group=grpDS, inline="r")
+
 grp8 = "Show/Hide Lines — 4H Bullish (+)"
 s4hBullTop = input.bool(true, "Top",    group=grp8, inline="r")
 s4hBullCE  = input.bool(true, "CE",     group=grp8, inline="r")
@@ -63,7 +97,7 @@ s15BearCE  = input.bool(true, "CE",     group=grp11, inline="r")
 s15BearBot = input.bool(true, "Bottom", group=grp11, inline="r")
 
 grp6 = "Proximity Arrow"
-showArrows    = input.bool(true, "Show proximity arrows", group=grp6, tooltip="Draw a red left-pointing arrow whenever any 4H level (Top/CE/Bottom) is within the threshold of any same-direction 15M level. The arrow is removed if either linked level is mitigated.")
+showArrows    = input.bool(true, "Show proximity arrows", group=grp6, tooltip="Draw a red left-pointing arrow whenever any Weekly / Daily / 4H level (Top/CE/Bottom) is within the threshold of any same-direction 15M level. The arrow is removed if either linked level is mitigated.")
 arrowThresh   = input.float(4.0, "Arrow max distance (points)", minval=0.0, step=0.1, group=grp6)
 arrowCol      = input.color(color.red, "Arrow color", group=grp6)
 arrowWidth    = input.int(2, "Arrow width", minval=1, maxval=5, group=grp6)
@@ -327,15 +361,21 @@ maintainArrows(array<Arrow> arrows) =>
 
 
 // ───────────────────────────── Storage ─────────────────────────────────────
+var array<FVG>   fvgW    = array.new<FVG>()
+var array<FVG>   fvgD    = array.new<FVG>()
 var array<FVG>   fvg4h   = array.new<FVG>()
 var array<FVG>   fvg15m  = array.new<FVG>()
 var array<Arrow> arrows  = array.new<Arrow>()
 
 
 // ─────────────────────── Pull HTF streams ──────────────────────────────────
-[H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, isNew4h]     = reqTF(tf4h)
-[H1_15, L1_15, H3_15, L3_15, T2_15, isNew15]     = reqTF(tf15m)
+[H1_W,  L1_W,  H3_W,  L3_W,  T2_W,  isNewW]  = reqTF(tfW)
+[H1_D,  L1_D,  H3_D,  L3_D,  T2_D,  isNewD]  = reqTF(tfD)
+[H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, isNew4h] = reqTF(tf4h)
+[H1_15, L1_15, H3_15, L3_15, T2_15, isNew15] = reqTF(tf15m)
 
+int msW  = timeframe.in_seconds(tfW)   * 1000
+int msD  = timeframe.in_seconds(tfD)   * 1000
 int ms4h = timeframe.in_seconds(tf4h)  * 1000
 int ms15 = timeframe.in_seconds(tf15m) * 1000
 
@@ -348,16 +388,36 @@ if show15m
     detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol, s15BullTop, s15BullCE, s15BullBot, s15BearTop, s15BearCE, s15BearBot)
 maintainFVG(fvg15m)
 
+int rightT = time + extendBars * (timeframe.in_seconds() * 1000)
+
+// Weekly.
+bool newW = false
+if showW or showArrows
+    [dW, bW, tW, bullW, dsW, deW] = detectFVG(fvgW, H1_W, L1_W, H3_W, L3_W, T2_W, msW, isNewW, "W", showW, showLabels and showW, bullWCol, bearWCol, sWBullTop, sWBullCE, sWBullBot, sWBearTop, sWBearCE, sWBearBot)
+    newW := dW
+maintainFVG(fvgW)
+if showArrows and newW and fvgW.size() > 0
+    addArrows(arrows, fvgW.last(), fvg15m, arrowThresh, rightT, arrowCol, arrowWidth)
+
+// Daily.
+bool newD = false
+if showD or showArrows
+    [dD, bD, tD, bullD, dsD, deD] = detectFVG(fvgD, H1_D, L1_D, H3_D, L3_D, T2_D, msD, isNewD, "D", showD, showLabels and showD, bullDCol, bearDCol, sDBullTop, sDBullCE, sDBullBot, sDBearTop, sDBearCE, sDBearBot)
+    newD := dD
+maintainFVG(fvgD)
+if showArrows and newD and fvgD.size() > 0
+    addArrows(arrows, fvgD.last(), fvg15m, arrowThresh, rightT, arrowCol, arrowWidth)
+
+// 4H.
 bool new4h = false
 if show4h or showArrows
     [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol, s4hBullTop, s4hBullCE, s4hBullBot, s4hBearTop, s4hBearCE, s4hBearBot)
     new4h := d4
 maintainFVG(fvg4h)
-
-// Proximity arrows: on a fresh 4H FVG, link its levels to nearby 15M levels.
+// Proximity arrows: on a fresh W/D/4H FVG, link its levels to nearby 15M levels.
 if showArrows and new4h and fvg4h.size() > 0
-    int rightT = time + extendBars * (timeframe.in_seconds() * 1000)
     addArrows(arrows, fvg4h.last(), fvg15m, arrowThresh, rightT, arrowCol, arrowWidth)
+
 // Remove arrows whose linked levels have since been mitigated.
 maintainArrows(arrows)
 
@@ -369,25 +429,35 @@ var table dash = na
 if showDash and barstate.islast
     if not na(dash)
         table.delete(dash)
-    dash := table.new(position = dashPos(), columns = 2, rows = 6, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
+    dash := table.new(position = dashPos(), columns = 2, rows = 10, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
 
     // Header
     table.cell(dash, 0, 0, "FVG Legend", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
     table.cell(dash, 1, 0, "", text_color = dashTxtCol, text_size = dashSize())
 
     // Helper via inline rows: swatch cell (colored bg) + description cell.
-    table.cell(dash, 0, 1, "  ", bgcolor = bull4hCol)
-    table.cell(dash, 1, 1, "+4H FVG (bullish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 2, "  ", bgcolor = bear4hCol)
-    table.cell(dash, 1, 2, "-4H FVG (bearish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 3, "  ", bgcolor = bull15mCol)
-    table.cell(dash, 1, 3, "+15M FVG (bullish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 4, "  ", bgcolor = bear15mCol)
-    table.cell(dash, 1, 4, "-15M FVG (bearish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 5, "  ", bgcolor = arrowCol)
-    table.cell(dash, 1, 5, "Proximity arrow",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 1, "  ", bgcolor = bullWCol)
+    table.cell(dash, 1, 1, "+W FVG (bullish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 2, "  ", bgcolor = bearWCol)
+    table.cell(dash, 1, 2, "-W FVG (bearish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 3, "  ", bgcolor = bullDCol)
+    table.cell(dash, 1, 3, "+D FVG (bullish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 4, "  ", bgcolor = bearDCol)
+    table.cell(dash, 1, 4, "-D FVG (bearish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 5, "  ", bgcolor = bull4hCol)
+    table.cell(dash, 1, 5, "+4H FVG (bullish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 6, "  ", bgcolor = bear4hCol)
+    table.cell(dash, 1, 6, "-4H FVG (bearish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 7, "  ", bgcolor = bull15mCol)
+    table.cell(dash, 1, 7, "+15M FVG (bullish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 8, "  ", bgcolor = bear15mCol)
+    table.cell(dash, 1, 8, "-15M FVG (bearish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    table.cell(dash, 0, 9, "  ", bgcolor = arrowCol)
+    table.cell(dash, 1, 9, "Proximity arrow",    text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
 
 
 // ───────────────────────────── Alerts ──────────────────────────────────────
+alertcondition(isNewW  and showW,   "New Weekly FVG", "A new Weekly Fair Value Gap has formed")
+alertcondition(isNewD  and showD,   "New Daily FVG",  "A new Daily Fair Value Gap has formed")
 alertcondition(isNew4h and show4h,  "New 4H FVG",  "A new 4H Fair Value Gap has formed")
 alertcondition(isNew15 and show15m, "New 15M FVG", "A new 15M Fair Value Gap has formed")
