@@ -154,7 +154,7 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
     if show
         ln := line.new(x1 = t2mid, y1 = lvl, x2 = t2mid + 1, y2 = lvl, xloc = xloc.bar_time, color = col, style = line.style_solid, width = lineWidth)
         if showLbl
-            lb := label.new(x = t2mid + 1, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_none, size = lblSize(), text_font_family = lblFont())
+            lb := label.new(x = t2mid + 1, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_label_left, size = lblSize(), text_font_family = lblFont())
     [ln, lb]
 
 
@@ -229,8 +229,9 @@ maintainFVG(array<FVG> store) =>
                             label.set_x(f.topLbl, time)
                 else if not na(f.topLn)
                     line.set_x2(f.topLn, newRight)
+                    // Label floats at the latest real bar so it stays visible.
                     if not na(f.topLbl)
-                        label.set_x(f.topLbl, newRight)
+                        label.set_x(f.topLbl, time)
 
             // Bottom level ─ mitigated once price trades down to it (low <= bot).
             if not f.botDone
@@ -244,7 +245,7 @@ maintainFVG(array<FVG> store) =>
                 else if not na(f.botLn)
                     line.set_x2(f.botLn, newRight)
                     if not na(f.botLbl)
-                        label.set_x(f.botLbl, newRight)
+                        label.set_x(f.botLbl, time)
 
             // CE level ─ mitigated when price trades through the midpoint.
             if not f.ceDone
@@ -258,7 +259,7 @@ maintainFVG(array<FVG> store) =>
                 else if not na(f.ceLn)
                     line.set_x2(f.ceLn, newRight)
                     if not na(f.ceLbl)
-                        label.set_x(f.ceLbl, newRight)
+                        label.set_x(f.ceLbl, time)
     true
 
 
