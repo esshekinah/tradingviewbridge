@@ -37,6 +37,7 @@ Each line extends to the right until **its own level is mitigated** (touched by 
 | **Max FVGs per set** | Trims oldest FVGs to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
 | **Show text labels** | Toggle the right-end labels; configurable **text size** (Tiny / Small / Normal / Large) and **font** (Default / Monospace — Pine Script only supports these two families; a true Arial is not available, but Default is TradingView's Arial-like sans-serif) |
+| **Dashboard (color legend)** | An on-chart table (default top-right) showing what each line/marker color means — 4H bull/bear, 15M bull/bear, Buy/Sell signals, and the proximity arrow. Configurable position, text size, background and text color; can be toggled off |
 | **Alerts** | Built-in `alertcondition` fires for new 4H / 15M FVGs and Buy/Sell signals |
 
 The timeframes are configurable inputs, so you can repurpose the indicator for any two timeframes (e.g. Daily + 1H) without editing code.
