@@ -59,6 +59,7 @@ maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100,
 extendBars    = input.int(30,  "Extend lines (bars)",      minval=0, maxval=500, group=grp4)
 showLabels    = input.bool(true, "Show text labels",   group=grp4)
 lblSizeInp    = input.string("Small", "Label text size", options=["Tiny","Small","Normal","Large"], group=grp4)
+lblFontInp    = input.string("Default", "Label font", options=["Default","Monospace"], group=grp4, tooltip="Pine Script only supports these two font families — a true Arial cannot be selected. 'Default' is TradingView's standard sans-serif (Arial-like).")
 
 
 // ─────────────────────────── FVG data type ─────────────────────────────────
@@ -110,6 +111,11 @@ ceOf(float top, float bot) => (top + bot) / 2.0
 lblSize() =>
     lblSizeInp == "Tiny" ? size.tiny : lblSizeInp == "Normal" ? size.normal : lblSizeInp == "Large" ? size.large : size.small
 
+// Map label-font input string to a Pine font-family constant.
+// Pine only exposes these two families — no custom/Arial font is available.
+lblFont() =>
+    lblFontInp == "Monospace" ? font.family_monospace : font.family_default
+
 
 // Returns true if the given 4H FVG levels are within `thresh` price points of
 // the given 15M FVG levels (any of the 9 Bottom/CE/Top line-to-line distances).
@@ -148,7 +154,7 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
     if show
         ln := line.new(x1 = t2mid, y1 = lvl, x2 = t2mid + 1, y2 = lvl, xloc = xloc.bar_time, color = col, style = line.style_solid, width = lineWidth)
         if showLbl
-            lb := label.new(x = t2mid + 1, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_none, size = lblSize())
+            lb := label.new(x = t2mid + 1, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_none, size = lblSize(), text_font_family = lblFont())
     [ln, lb]
 
 
