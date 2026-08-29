@@ -43,7 +43,7 @@ Each line extends to the right until **its own level is mitigated**, then it is 
 | **Show 4H / 15M** | Toggle each timeframe independently |
 | **Line colors** | Four independent color inputs — **4H Bullish (+)**, **4H Bearish (-)**, **15M Bullish (+)**, **15M Bearish (-)** — so each timeframe/direction can be styled separately (defaults: 4H white/red, 15M aqua/orange) |
 | **Line width** | Thickness of the level lines |
-| **Show Top / CE / Bottom line** | Toggle each of the three levels on/off |
+| **Show/Hide Lines** | Per-category visibility — Top, CE, and Bottom can each be toggled independently for **4H Bullish**, **4H Bearish**, **15M Bullish**, and **15M Bearish** (12 toggles total, grouped in settings) |
 | **Max FVGs per set** | Trims oldest FVGs to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
 | **Show text labels** | Toggle the right-end labels; configurable **text size** (Tiny / Small / Normal / Large) and **font** (Default / Monospace — Pine Script only supports these two families; a true Arial is not available, but Default is TradingView's Arial-like sans-serif) |
