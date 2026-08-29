@@ -238,6 +238,7 @@ maintainFVG(array<FVG> store) =>
                     line.set_x2(f.ceLn, newRight)
                     if not na(f.ceLbl)
                         label.set_x(f.ceLbl, newRight)
+    true
 
 
 // When a 4H FVG has just confirmed, create a red left-pointing arrow for every
@@ -259,6 +260,7 @@ addArrows(array<Arrow> arrows, FVG f4, array<FVG> m15, float thresh, int rightTi
                             // tail extends `arrowLen` bars to the right.
                             line al = line.new(x1 = rightTime, y1 = mid, x2 = rightTime + arrowLen * (timeframe.in_seconds() * 1000), y2 = mid, xloc = xloc.bar_time, color = col, width = width, style = line.style_arrow_left)
                             arrows.push(Arrow.new(al, f4, a4, f15, a15))
+    true
 
 
 // Remove any arrow whose 4H or 15M linked level has been mitigated.
@@ -269,6 +271,7 @@ maintainArrows(array<Arrow> arrows) =>
             if lvlDone(a.f4, a.lvl4) or lvlDone(a.f15, a.lvl15)
                 line.delete(a.ln)
                 arrows.remove(i)
+    true
 
 
 // ───────────────────────────── Storage ─────────────────────────────────────
