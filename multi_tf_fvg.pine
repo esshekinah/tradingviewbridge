@@ -1,5 +1,5 @@
 //@version=5
-indicator("Multi-TF FVG (4H + 15M)", overlay=true, max_boxes_count=500, max_lines_count=500)
+indicator("Multi-TF FVG (4H + 15M)", overlay=true, max_lines_count=500, max_labels_count=500)
 
 // ============================================================================
 // Multi-Timeframe Fair Value Gap (FVG) Indicator
@@ -10,63 +10,75 @@ indicator("Multi-TF FVG (4H + 15M)", overlay=true, max_boxes_count=500, max_line
 // An FVG (a.k.a. imbalance) is a 3-candle pattern:
 //   Bullish FVG : low of candle[1]  >  high of candle[3]   (gap between them)
 //   Bearish FVG : high of candle[1] <  low  of candle[3]   (gap between them)
-// The gap is the untraded price range between candle 1 and candle 3.
+//
+// Each FVG is drawn as THREE horizontal lines — Top, CE (midpoint), Bottom —
+// each with a text label at its right end:
+//   +4H FVG Top / CE / Bottom     ( + = bullish, white )
+//   -4H FVG Top / CE / Bottom     ( - = bearish, red   )
+//   +15M FVG Top / CE / Bottom
+//   -15M FVG Top / CE / Bottom
+//
+// Each line extends to the right until its own level is mitigated (touched by
+// price), at which point the line is discontinued — frozen at the bar where
+// the mitigation happened.
 // ============================================================================
 
 
 // ─────────────────────────────── Inputs ────────────────────────────────────
 grp1 = "4H FVG Settings"
-show4h        = input.bool(true,  "Show 4H FVGs",                 group=grp1)
-tf4h          = input.timeframe("240", "4H Timeframe",            group=grp1)
-bull4hCol     = input.color(color.new(color.teal,   80), "4H Bullish",  group=grp1, inline="c4")
-bear4hCol     = input.color(color.new(color.red,    80), "4H Bearish",  group=grp1, inline="c4")
-show4hCE      = input.bool(true, "Show 4H CE line",  group=grp1)
-ce4hCol       = input.color(color.new(color.teal, 0), "4H CE color", group=grp1, inline="ce4")
+show4h        = input.bool(true,   "Show 4H FVGs",       group=grp1)
+tf4h          = input.timeframe("240", "4H Timeframe",   group=grp1)
 
 grp2 = "15M FVG Settings"
-show15m       = input.bool(true,  "Show 15M FVGs",                group=grp2)
-tf15m         = input.timeframe("15", "15M Timeframe",            group=grp2)
-bull15mCol    = input.color(color.new(color.aqua,   70), "15M Bullish", group=grp2, inline="c15")
-bear15mCol    = input.color(color.new(color.orange, 70), "15M Bearish", group=grp2, inline="c15")
-show15mCE     = input.bool(true, "Show 15M CE line", group=grp2)
-ce15mCol      = input.color(color.new(color.orange, 0), "15M CE color", group=grp2, inline="ce15")
+show15m       = input.bool(true,   "Show 15M FVGs",      group=grp2)
+tf15m         = input.timeframe("15",  "15M Timeframe",  group=grp2)
+
+grp5 = "Line & Color Settings"
+bullCol       = input.color(color.white, "Bullish (+) color", group=grp5, inline="dir")
+bearCol       = input.color(color.red,   "Bearish (-) color", group=grp5, inline="dir")
+lineWidth     = input.int(1, "Line width", minval=1, maxval=4, group=grp5)
+showTopLn     = input.bool(true, "Show Top line",    group=grp5, inline="which")
+showCELn      = input.bool(true, "Show CE line",     group=grp5, inline="which")
+showBotLn     = input.bool(true, "Show Bottom line", group=grp5, inline="which")
 
 grp3 = "Signal Settings"
 showSignals   = input.bool(true, "Show Buy/Sell signals", group=grp3)
 signalThresh  = input.float(4.0, "Max line distance (price points)", minval=0.0, step=0.1, group=grp3, tooltip="A signal fires when a same-direction 15M FVG formed DURING the 4H displacement candle AND any 4H level (Bottom/CE/Top) is within this many price points of any 15M level. Set to match the instrument's scale — e.g. ~4 on an index like US Tech 100.")
-buyCol        = input.color(color.lime, "Buy signal",  group=grp3, inline="sig")
-sellCol       = input.color(color.red,  "Sell signal", group=grp3, inline="sig")
+buySigCol     = input.color(color.lime, "Buy signal",  group=grp3, inline="sig")
+sellSigCol    = input.color(color.red,  "Sell signal", group=grp3, inline="sig")
 
 grp4 = "General"
 maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100, group=grp4)
-extendBars    = input.int(30,  "Extend boxes (bars)",      minval=0, maxval=500, group=grp4)
-removeFilled  = input.bool(true, "Remove FVG when filled (mitigated)", group=grp4)
-showLabels    = input.bool(true, "Show timeframe labels",   group=grp4)
-lblHAlignInp  = input.string("Right",  "Label horizontal position", options=["Left","Center","Right"], group=grp4)
-lblVAlignInp  = input.string("Center", "Label vertical position",   options=["Top","Center","Bottom"], group=grp4)
-lblSizeInp    = input.string("Tiny",   "Label text size", options=["Tiny","Small","Normal","Large"], group=grp4)
-lblColor      = input.color(color.new(color.gray, 20), "Label text color", group=grp4)
-borderWidth   = input.int(1,   "Border width", minval=0, maxval=4, group=grp4)
-ceStyleInp    = input.string("Dashed", "CE line style", options=["Solid","Dashed","Dotted"], group=grp4)
-ceWidth       = input.int(1,   "CE line width", minval=1, maxval=4, group=grp4)
+extendBars    = input.int(30,  "Extend lines (bars)",      minval=0, maxval=500, group=grp4)
+showLabels    = input.bool(true, "Show text labels",   group=grp4)
+lblSizeInp    = input.string("Small", "Label text size", options=["Tiny","Small","Normal","Large"], group=grp4)
 
 
 // ─────────────────────────── FVG data type ─────────────────────────────────
+// Each FVG owns 3 lines and their 3 labels. A line is `na` when its level is
+// hidden by the user. `topDone/ceDone/botDone` mark a level as mitigated so it
+// stops extending (the line is left frozen at the mitigation bar).
 type FVG
-    box   bx
     float top
+    float ce
     float bot
     bool  isBull
-    bool  filled
     int   dispStart   // displacement candle open time (ms)
     int   dispEnd     // displacement candle close time (ms) = start + TF duration
-    line  ceLn        // CE (midpoint) line, na if not drawn
+    line  topLn
+    line  ceLn
+    line  botLn
+    label topLbl
+    label ceLbl
+    label botLbl
+    bool  topDone
+    bool  ceDone
+    bool  botDone
 
 
 // ─────────────── Request 3-candle data from a higher timeframe ──────────────
 // We pull high/low of candle[1] and candle[3] plus the bar time of candle[2]
 // (the middle candle, which anchors the gap on the timeline).
-// Wrapped in a function so we can reuse it for each timeframe.
 reqTF(simple string tf) =>
     request.security(syminfo.tickerid, tf,
          [high[1], low[1], high[3], low[3], time[2], ta.change(time[1]) != 0],
@@ -74,19 +86,11 @@ reqTF(simple string tf) =>
 
 
 // CE (Consequent Encroachment) = midpoint of an FVG.
-ce(float top, float bot) => (top + bot) / 2.0
+ceOf(float top, float bot) => (top + bot) / 2.0
 
-// Map the CE line-style input string to a Pine line style constant.
-ceStyle() =>
-    ceStyleInp == "Solid"  ? line.style_solid  : ceStyleInp == "Dotted" ? line.style_dotted : line.style_dashed
-
-// Map label-position / size input strings to Pine constants.
-lblHAlign() =>
-    lblHAlignInp == "Left" ? text.align_left : lblHAlignInp == "Center" ? text.align_center : text.align_right
-lblVAlign() =>
-    lblVAlignInp == "Top" ? text.align_top : lblVAlignInp == "Bottom" ? text.align_bottom : text.align_center
+// Map label-size input string to a Pine size constant.
 lblSize() =>
-    lblSizeInp == "Small" ? size.small : lblSizeInp == "Normal" ? size.normal : lblSizeInp == "Large" ? size.large : size.tiny
+    lblSizeInp == "Tiny" ? size.tiny : lblSizeInp == "Normal" ? size.normal : lblSizeInp == "Large" ? size.large : size.small
 
 
 // Returns true if the given 4H FVG levels are within `thresh` price points of
@@ -98,27 +102,34 @@ levelsNear(float bot4, float ce4, float top4, float bot15, float ce15, float top
 // When a 4H FVG has just confirmed, scan the stored 15M FVGs and return true if
 // ANY same-direction 15M FVG (a) formed DURING this 4H FVG's displacement candle
 // window and (b) has a level within `thresh` price points of a 4H level.
-// This runs on 4H confirmation because a 4H FVG is only known ~8h AFTER its
-// displacement candle — long after the 15M FVGs inside it have already formed.
 signalOn4hConfirm(array<FVG> m15, float bot4, float top4, int dStart, int dEnd, bool isBull, float thresh) =>
     bool hit = false
     if m15.size() > 0
-        float ce4 = ce(top4, bot4)
+        float ce4 = ceOf(top4, bot4)
         for i = 0 to m15.size() - 1
             FVG f = m15.get(i)
             if f.isBull == isBull and f.dispStart >= dStart and f.dispStart < dEnd
-                if levelsNear(bot4, ce4, top4, f.bot, ce(f.top, f.bot), f.top, thresh)
+                if levelsNear(bot4, ce4, top4, f.bot, f.ce, f.top, thresh)
                     hit := true
     hit
 
 
+// Create one horizontal level line + right-end label. Returns [line, label].
+mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
+    line  ln = na
+    label lb = na
+    if show
+        ln := line.new(x1 = t2mid, y1 = lvl, x2 = t2mid + 1, y2 = lvl, xloc = xloc.bar_time, color = col, style = line.style_solid, width = lineWidth)
+        if showLbl
+            lb := label.new(x = t2mid + 1, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_label_left, size = lblSize())
+    [ln, lb]
+
+
 // ─────────────────────── FVG detection + drawing ───────────────────────────
-// Detects a new FVG on the given HTF stream and appends it to `store`.
-// `tfMs` is the duration of one bar of this FVG's timeframe, in milliseconds,
-// used to bound the displacement candle window [t2mid, t2mid + tfMs).
-// Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for the new FVG so
-// the caller can run cross-timeframe signal logic on confirmation.
-detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, color bullCol, color bearCol, string tfLabel, bool showLbl, bool visible, bool showCE, color ceCol) =>
+// Detects a new FVG on the given HTF stream and appends it to `store`, drawing
+// the Top/CE/Bottom lines and labels. `tfMs` bounds the displacement window.
+// Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for signal logic.
+detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl) =>
     bool  drawn   = false
     float newTop  = na
     float newBot  = na
@@ -131,7 +142,7 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
         if bull or bear
             float top = bull ? ll1 : ll3
             float bot = bull ? hh3 : hh1
-            // Displacement candle window = [t2mid, t2mid + tfMs).
+            float ceL = ceOf(top, bot)
             int dStart = t2mid
             int dEnd   = t2mid + tfMs
             drawn   := true
@@ -140,52 +151,66 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
             newBull := bull
             newDS   := dStart
             newDE   := dEnd
-            color col      = bull ? bullCol : bearCol
-            // When not visible, draw transparent so the box still exists for logic.
-            color bgCol    = visible ? col : color.new(col, 100)
-            color bordCol  = visible ? color.new(col, 0) : color.new(col, 100)
-            box b = box.new(left = t2mid, top = top, right = t2mid + 1, bottom = bot, xloc = xloc.bar_time, border_color = bordCol, border_width = borderWidth, bgcolor = bgCol)
-            if showLbl
-                box.set_text(b, tfLabel + (bull ? " Bull FVG" : " Bear FVG"))
-                box.set_text_size(b, lblSize())
-                box.set_text_color(b, lblColor)
-                box.set_text_halign(b, lblHAlign())
-                box.set_text_valign(b, lblVAlign())
-            // CE (midpoint) line spanning the FVG box.
-            line ceLine = na
-            if visible and showCE
-                float ceLvl = ce(top, bot)
-                ceLine := line.new(x1 = t2mid, y1 = ceLvl, x2 = t2mid + 1, y2 = ceLvl, xloc = xloc.bar_time, color = ceCol, style = ceStyle(), width = ceWidth)
-            store.push(FVG.new(b, top, bot, bull, false, dStart, dEnd, ceLine))
-            // Trim oldest
+
+            color col  = bull ? bullCol : bearCol
+            string sgn = bull ? "+" : "-"           // + bullish, - bearish
+            string pfx = sgn + tfLabel + " FVG "    // e.g. "+4H FVG "
+
+            [tLn, tLb] = mkLevel(t2mid, top, col, pfx + "Top",    visible and showTopLn, showLbl)
+            [cLn, cLb] = mkLevel(t2mid, ceL, col, pfx + "CE",     visible and showCELn,  showLbl)
+            [bLn, bLb] = mkLevel(t2mid, bot, col, pfx + "Bottom", visible and showBotLn, showLbl)
+
+            store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
+
+            // Trim oldest (delete its drawings).
             if store.size() > maxFvgs
                 FVG old = store.shift()
-                box.delete(old.bx)
-                if not na(old.ceLn)
-                    line.delete(old.ceLn)
+                line.delete(old.topLn)
+                line.delete(old.ceLn)
+                line.delete(old.botLn)
+                label.delete(old.topLbl)
+                label.delete(old.ceLbl)
+                label.delete(old.botLbl)
     [drawn, newBot, newTop, newBull, newDS, newDE]
 
 
-// Keeps FVG boxes extending to the right, and removes mitigated ones.
+// Extends each still-active level to the right, and DISCONTINUES a level (stops
+// extending, leaves it frozen) once price touches that specific level.
 maintainFVG(array<FVG> store) =>
     if store.size() > 0
-        for i = store.size() - 1 to 0
+        int newRight = time + extendBars * (timeframe.in_seconds() * 1000)
+        for i = 0 to store.size() - 1
             FVG f = store.get(i)
-            if not f.filled
-                // extend the box (and CE line) forward in time
-                int newRight = time + extendBars * (timeframe.in_seconds() * 1000)
-                box.set_right(f.bx, newRight)
-                if not na(f.ceLn)
-                    line.set_x2(f.ceLn, newRight)
-                // mitigation check: price traded fully through the gap
-                bool mitigated = f.isBull ? (low <= f.bot) : (high >= f.top)
-                if mitigated
-                    f.filled := true
-                    if removeFilled
-                        box.delete(f.bx)
-                        if not na(f.ceLn)
-                            line.delete(f.ceLn)
-                        store.remove(i)
+
+            // Top level ─ mitigated once price trades up to it (high >= top).
+            if not f.topDone
+                if high >= f.top
+                    f.topDone := true
+                else
+                    if not na(f.topLn)
+                        line.set_x2(f.topLn, newRight)
+                        if not na(f.topLbl)
+                            label.set_x(f.topLbl, newRight)
+
+            // Bottom level ─ mitigated once price trades down to it (low <= bot).
+            if not f.botDone
+                if low <= f.bot
+                    f.botDone := true
+                else
+                    if not na(f.botLn)
+                        line.set_x2(f.botLn, newRight)
+                        if not na(f.botLbl)
+                            label.set_x(f.botLbl, newRight)
+
+            // CE level ─ mitigated when price trades through the midpoint.
+            if not f.ceDone
+                if low <= f.ce and high >= f.ce
+                    f.ceDone := true
+                else
+                    if not na(f.ceLn)
+                        line.set_x2(f.ceLn, newRight)
+                        if not na(f.ceLbl)
+                            label.set_x(f.ceLbl, newRight)
 
 
 // ───────────────────────────── Storage ─────────────────────────────────────
@@ -197,8 +222,6 @@ var array<FVG> fvg15m = array.new<FVG>()
 [H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, isNew4h]     = reqTF(tf4h)
 [H1_15, L1_15, H3_15, L3_15, T2_15, isNew15]     = reqTF(tf15m)
 
-// Bar duration (ms) for each configured timeframe — used to bound the
-// displacement candle window [start, start + duration).
 int ms4h = timeframe.in_seconds(tf4h)  * 1000
 int ms15 = timeframe.in_seconds(tf15m) * 1000
 
@@ -206,21 +229,19 @@ int ms15 = timeframe.in_seconds(tf15m) * 1000
 // ─────────────────────────── Run detection ─────────────────────────────────
 // Detect and store 15M FVGs FIRST. A 4H FVG confirms ~8h after its displacement
 // candle, so the 15M FVGs that formed *during* that candle already exist in the
-// store by the time the 4H FVG is confirmed. Signals are therefore emitted on
-// 4H confirmation, scanning backward over the stored 15M FVGs.
+// store by the time the 4H FVG is confirmed. Signals are emitted on 4H confirm.
 if show15m
-    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, bull15mCol, bear15mCol, "15M", showLabels, true, show15mCE, ce15mCol)
+    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels)
 maintainFVG(fvg15m)
 
-// Detect 4H FVGs whenever they're shown OR needed for signals.
-bool  new4h    = false
-float n4Bot    = na
-float n4Top    = na
-bool  n4Bull   = false
-int   n4DS     = na
-int   n4DE     = na
+bool  new4h  = false
+float n4Bot  = na
+float n4Top  = na
+bool  n4Bull = false
+int   n4DS   = na
+int   n4DE   = na
 if show4h or showSignals
-    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, bull4hCol, bear4hCol, "4H", showLabels and show4h, show4h, show4hCE, ce4hCol)
+    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h)
     new4h  := d4
     n4Bot  := b4
     n4Top  := t4
@@ -234,8 +255,7 @@ maintainFVG(fvg4h)
 // When a 4H FVG confirms, scan stored 15M FVGs. If any SAME-DIRECTION 15M FVG
 // (a) formed DURING this 4H FVG's displacement candle window, and (b) has a
 // level (Bottom / CE / Top) within `signalThresh` price points of a 4H level,
-// fire a signal:
-//   Buy  → bullish 4H+15M pair   |   Sell → bearish pair
+// fire a signal: Buy → bullish pair, Sell → bearish pair.
 bool buySignal  = false
 bool sellSignal = false
 if showSignals and new4h and not na(n4Bot)
@@ -244,12 +264,12 @@ if showSignals and new4h and not na(n4Bot)
         buySignal  := n4Bull
         sellSignal := not n4Bull
 
-plotshape(buySignal,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=buyCol,  size=size.small, text="BUY",  textcolor=buyCol)
-plotshape(sellSignal, title="Sell", style=shape.triangledown, location=location.abovebar, color=sellCol, size=size.small, text="SELL", textcolor=sellCol)
+plotshape(buySignal,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=buySigCol,  size=size.small, text="BUY",  textcolor=buySigCol)
+plotshape(sellSignal, title="Sell", style=shape.triangledown, location=location.abovebar, color=sellSigCol, size=size.small, text="SELL", textcolor=sellSigCol)
 
 
 // ───────────────────────────── Alerts ──────────────────────────────────────
 alertcondition(isNew4h and show4h,  "New 4H FVG",  "A new 4H Fair Value Gap has formed")
-alertcondition(isNew15 and show15m, "New 15M FVG",  "A new 15M Fair Value Gap has formed")
+alertcondition(isNew15 and show15m, "New 15M FVG", "A new 15M Fair Value Gap has formed")
 alertcondition(buySignal,           "Buy Signal",  "4H+15M FVG confluence during formation - BUY")
 alertcondition(sellSignal,          "Sell Signal", "4H+15M FVG confluence during formation - SELL")

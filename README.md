@@ -11,19 +11,33 @@ An FVG (a.k.a. imbalance) is a classic 3-candle pattern representing an untraded
 - **Bullish FVG** → `low[1] > high[3]` (gap between candle 1's low and candle 3's high)
 - **Bearish FVG** → `high[1] < low[3]` (gap between candle 1's high and candle 3's low)
 
+## How each FVG is drawn
+
+Instead of a shaded rectangle, every FVG is drawn as **three horizontal lines** — **Top**, **CE** (midpoint), and **Bottom** — each with a text label at its right end:
+
+```
++4H FVG Top      -4H FVG Top       +15M FVG Top      -15M FVG Top
++4H FVG CE       -4H FVG CE        +15M FVG CE       -15M FVG CE
++4H FVG Bottom   -4H FVG Bottom    +15M FVG Bottom   -15M FVG Bottom
+```
+
+- `+` = **bullish** FVG (drawn in **white** by default)
+- `-` = **bearish** FVG (drawn in **red** by default)
+
+Each line extends to the right until **its own level is mitigated** (touched by price), then it is **discontinued** — frozen at the bar where price reached it. The Top, CE, and Bottom of a single FVG are mitigated independently.
+
 ## Features
 
 | Setting | Description |
 |---|---|
 | **Show 4H / 15M** | Toggle each timeframe independently |
-| **Only 15M inside 4H (confluence)** | When enabled, a 15M FVG is drawn **only if any part of its range overlaps an active 4H FVG zone** — filtering for high-probability confluence setups |
-| **Colors** | Separate bull/bear colors per timeframe for easy identification |
-| **Show 4H / 15M CE line** | Draws the Consequent Encroachment (midpoint) line through each FVG, with its own color per timeframe and configurable style (Solid / Dashed / Dotted) and width |
-| **Max FVGs per set** | Trims oldest gaps to keep the chart clean |
-| **Extend boxes** | How far right each gap box projects |
-| **Remove when filled** | Auto-deletes a gap once price fully mitigates it |
-| **Labels** | Tags each box as "4H Bull FVG", "15M Bear FVG", etc. Configurable **horizontal position** (Left / Center / **Right**, default Right so the text sits at the far-right end of the box), **vertical position** (Top / Center / Bottom), **text size** (Tiny / Small / Normal / Large), and **text color** |
-| **Alerts** | Built-in `alertcondition` fires when a new 4H or 15M FVG forms |
+| **Bullish (+) / Bearish (-) color** | Direction-based line colors (default white / red) |
+| **Line width** | Thickness of the level lines |
+| **Show Top / CE / Bottom line** | Toggle each of the three levels on/off |
+| **Max FVGs per set** | Trims oldest FVGs to keep the chart clean |
+| **Extend lines (bars)** | How far right each active level projects |
+| **Show text labels** | Toggle the right-end labels; configurable **text size** (Tiny / Small / Normal / Large) |
+| **Alerts** | Built-in `alertcondition` fires for new 4H / 15M FVGs and Buy/Sell signals |
 
 The timeframes are configurable inputs, so you can repurpose the indicator for any two timeframes (e.g. Daily + 1H) without editing code.
 
