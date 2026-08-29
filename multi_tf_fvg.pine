@@ -20,12 +20,16 @@ show4h        = input.bool(true,  "Show 4H FVGs",                 group=grp1)
 tf4h          = input.timeframe("240", "4H Timeframe",            group=grp1)
 bull4hCol     = input.color(color.new(color.teal,   80), "4H Bullish",  group=grp1, inline="c4")
 bear4hCol     = input.color(color.new(color.red,    80), "4H Bearish",  group=grp1, inline="c4")
+show4hCE      = input.bool(true, "Show 4H CE line",  group=grp1)
+ce4hCol       = input.color(color.new(color.teal, 0), "4H CE color", group=grp1, inline="ce4")
 
 grp2 = "15M FVG Settings"
 show15m       = input.bool(true,  "Show 15M FVGs",                group=grp2)
 tf15m         = input.timeframe("15", "15M Timeframe",            group=grp2)
 bull15mCol    = input.color(color.new(color.aqua,   70), "15M Bullish", group=grp2, inline="c15")
 bear15mCol    = input.color(color.new(color.orange, 70), "15M Bearish", group=grp2, inline="c15")
+show15mCE     = input.bool(true, "Show 15M CE line", group=grp2)
+ce15mCol      = input.color(color.new(color.orange, 0), "15M CE color", group=grp2, inline="ce15")
 
 grp3 = "Signal Settings"
 showSignals   = input.bool(true, "Show Buy/Sell signals", group=grp3)
@@ -39,6 +43,8 @@ extendBars    = input.int(30,  "Extend boxes (bars)",      minval=0, maxval=500,
 removeFilled  = input.bool(true, "Remove FVG when filled (mitigated)", group=grp4)
 showLabels    = input.bool(true, "Show timeframe labels",   group=grp4)
 borderWidth   = input.int(1,   "Border width", minval=0, maxval=4, group=grp4)
+ceStyleInp    = input.string("Dashed", "CE line style", options=["Solid","Dashed","Dotted"], group=grp4)
+ceWidth       = input.int(1,   "CE line width", minval=1, maxval=4, group=grp4)
 
 
 // ─────────────────────────── FVG data type ─────────────────────────────────
@@ -50,6 +56,7 @@ type FVG
     bool  filled
     int   dispStart   // displacement candle open time (ms)
     int   dispEnd     // displacement candle close time (ms) = start + TF duration
+    line  ceLn        // CE (midpoint) line, na if not drawn
 
 
 // ─────────────── Request 3-candle data from a higher timeframe ──────────────
@@ -64,6 +71,10 @@ reqTF(simple string tf) =>
 
 // CE (Consequent Encroachment) = midpoint of an FVG.
 ce(float top, float bot) => (top + bot) / 2.0
+
+// Map the CE line-style input string to a Pine line style constant.
+ceStyle() =>
+    ceStyleInp == "Solid"  ? line.style_solid  : ceStyleInp == "Dotted" ? line.style_dotted : line.style_dashed
 
 
 // Returns true if the given 4H FVG levels are within `thresh` price points of
@@ -95,7 +106,7 @@ signalOn4hConfirm(array<FVG> m15, float bot4, float top4, int dStart, int dEnd, 
 // used to bound the displacement candle window [t2mid, t2mid + tfMs).
 // Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for the new FVG so
 // the caller can run cross-timeframe signal logic on confirmation.
-detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, color bullCol, color bearCol, string tfLabel, bool showLbl, bool visible) =>
+detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, color bullCol, color bearCol, string tfLabel, bool showLbl, bool visible, bool showCE, color ceCol) =>
     bool  drawn   = false
     float newTop  = na
     float newBot  = na
@@ -128,11 +139,18 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
                 box.set_text_color(b, color.new(color.gray, 20))
                 box.set_text_halign(b, text.align_left)
                 box.set_text_valign(b, text.align_center)
-            store.push(FVG.new(b, top, bot, bull, false, dStart, dEnd))
+            // CE (midpoint) line spanning the FVG box.
+            line ceLine = na
+            if visible and showCE
+                float ceLvl = ce(top, bot)
+                ceLine := line.new(x1 = t2mid, y1 = ceLvl, x2 = t2mid + 1, y2 = ceLvl, xloc = xloc.bar_time, color = ceCol, style = ceStyle(), width = ceWidth)
+            store.push(FVG.new(b, top, bot, bull, false, dStart, dEnd, ceLine))
             // Trim oldest
             if store.size() > maxFvgs
                 FVG old = store.shift()
                 box.delete(old.bx)
+                if not na(old.ceLn)
+                    line.delete(old.ceLn)
     [drawn, newBot, newTop, newBull, newDS, newDE]
 
 
@@ -142,14 +160,19 @@ maintainFVG(array<FVG> store) =>
         for i = store.size() - 1 to 0
             FVG f = store.get(i)
             if not f.filled
-                // extend the box forward in time
-                box.set_right(f.bx, time + extendBars * (timeframe.in_seconds() * 1000))
+                // extend the box (and CE line) forward in time
+                int newRight = time + extendBars * (timeframe.in_seconds() * 1000)
+                box.set_right(f.bx, newRight)
+                if not na(f.ceLn)
+                    line.set_x2(f.ceLn, newRight)
                 // mitigation check: price traded fully through the gap
                 bool mitigated = f.isBull ? (low <= f.bot) : (high >= f.top)
                 if mitigated
                     f.filled := true
                     if removeFilled
                         box.delete(f.bx)
+                        if not na(f.ceLn)
+                            line.delete(f.ceLn)
                         store.remove(i)
 
 
@@ -174,7 +197,7 @@ int ms15 = timeframe.in_seconds(tf15m) * 1000
 // store by the time the 4H FVG is confirmed. Signals are therefore emitted on
 // 4H confirmation, scanning backward over the stored 15M FVGs.
 if show15m
-    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, bull15mCol, bear15mCol, "15M", showLabels, true)
+    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, bull15mCol, bear15mCol, "15M", showLabels, true, show15mCE, ce15mCol)
 maintainFVG(fvg15m)
 
 // Detect 4H FVGs whenever they're shown OR needed for signals.
@@ -185,7 +208,7 @@ bool  n4Bull   = false
 int   n4DS     = na
 int   n4DE     = na
 if show4h or showSignals
-    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, bull4hCol, bear4hCol, "4H", showLabels and show4h, show4h)
+    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, bull4hCol, bear4hCol, "4H", showLabels and show4h, show4h, show4hCE, ce4hCol)
     new4h  := d4
     n4Bot  := b4
     n4Top  := t4

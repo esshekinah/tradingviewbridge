@@ -18,6 +18,7 @@ An FVG (a.k.a. imbalance) is a classic 3-candle pattern representing an untraded
 | **Show 4H / 15M** | Toggle each timeframe independently |
 | **Only 15M inside 4H (confluence)** | When enabled, a 15M FVG is drawn **only if any part of its range overlaps an active 4H FVG zone** — filtering for high-probability confluence setups |
 | **Colors** | Separate bull/bear colors per timeframe for easy identification |
+| **Show 4H / 15M CE line** | Draws the Consequent Encroachment (midpoint) line through each FVG, with its own color per timeframe and configurable style (Solid / Dashed / Dotted) and width |
 | **Max FVGs per set** | Trims oldest gaps to keep the chart clean |
 | **Extend boxes** | How far right each gap box projects |
 | **Remove when filled** | Auto-deletes a gap once price fully mitigates it |
