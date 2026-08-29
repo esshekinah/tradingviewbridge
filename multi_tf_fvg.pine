@@ -538,53 +538,89 @@ maintainFVG(ob15m)
 
 
 // ─────────────────────────── Dashboard (legend) ────────────────────────────
-// A small color legend explaining what each line/marker color means. Built
-// once on the last bar for efficiency; rebuilt if inputs change.
+// Horizontal legend: one COLUMN per enabled level, with two rows —
+//   row 0 = short label (e.g. "+4H FVG T" / "+4H FVG CE" / "-D OB B")
+//   row 1 = the level's color swatch
+// A level appears only if its timeframe is shown AND that level's toggle is on
+// (so anything hidden on the chart is also omitted from the dashboard).
+// Built once on the last bar for efficiency; rebuilt if inputs change.
 var table dash = na
+
+// Collect the enabled levels into parallel arrays (label + color), in order.
+addLvl(array<string> labels, array<color> cols, bool shownTF, bool shownLvl, string txt, color c) =>
+    if shownTF and shownLvl
+        labels.push(txt)
+        cols.push(c)
+    true
+
 if showDash and barstate.islast
     if not na(dash)
         table.delete(dash)
-    dash := table.new(position = dashPos(), columns = 2, rows = 17, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
 
-    // Header
-    table.cell(dash, 0, 0, "FVG / OB Legend", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 1, 0, "", text_color = dashTxtCol, text_size = dashSize())
+    array<string> dLbl = array.new<string>()
+    array<color>  dCol = array.new<color>()
 
-    // FVG rows.
-    table.cell(dash, 0, 1, "  ", bgcolor = bullWCol)
-    table.cell(dash, 1, 1, "+W FVG (bullish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 2, "  ", bgcolor = bearWCol)
-    table.cell(dash, 1, 2, "-W FVG (bearish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 3, "  ", bgcolor = bullDCol)
-    table.cell(dash, 1, 3, "+D FVG (bullish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 4, "  ", bgcolor = bearDCol)
-    table.cell(dash, 1, 4, "-D FVG (bearish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 5, "  ", bgcolor = bull4hCol)
-    table.cell(dash, 1, 5, "+4H FVG (bullish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 6, "  ", bgcolor = bear4hCol)
-    table.cell(dash, 1, 6, "-4H FVG (bearish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 7, "  ", bgcolor = bull15mCol)
-    table.cell(dash, 1, 7, "+15M FVG (bullish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 8, "  ", bgcolor = bear15mCol)
-    table.cell(dash, 1, 8, "-15M FVG (bearish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    // FVG levels (T / CE / B) for each timeframe & direction.
+    addLvl(dLbl, dCol, showW,  sWBullTop, "+W FVG T",  bullWCol)
+    addLvl(dLbl, dCol, showW,  sWBullCE,  "+W FVG CE", bullWCol)
+    addLvl(dLbl, dCol, showW,  sWBullBot, "+W FVG B",  bullWCol)
+    addLvl(dLbl, dCol, showW,  sWBearTop, "-W FVG T",  bearWCol)
+    addLvl(dLbl, dCol, showW,  sWBearCE,  "-W FVG CE", bearWCol)
+    addLvl(dLbl, dCol, showW,  sWBearBot, "-W FVG B",  bearWCol)
+    addLvl(dLbl, dCol, showD,  sDBullTop, "+D FVG T",  bullDCol)
+    addLvl(dLbl, dCol, showD,  sDBullCE,  "+D FVG CE", bullDCol)
+    addLvl(dLbl, dCol, showD,  sDBullBot, "+D FVG B",  bullDCol)
+    addLvl(dLbl, dCol, showD,  sDBearTop, "-D FVG T",  bearDCol)
+    addLvl(dLbl, dCol, showD,  sDBearCE,  "-D FVG CE", bearDCol)
+    addLvl(dLbl, dCol, showD,  sDBearBot, "-D FVG B",  bearDCol)
+    addLvl(dLbl, dCol, show4h, s4hBullTop, "+4H FVG T",  bull4hCol)
+    addLvl(dLbl, dCol, show4h, s4hBullCE,  "+4H FVG CE", bull4hCol)
+    addLvl(dLbl, dCol, show4h, s4hBullBot, "+4H FVG B",  bull4hCol)
+    addLvl(dLbl, dCol, show4h, s4hBearTop, "-4H FVG T",  bear4hCol)
+    addLvl(dLbl, dCol, show4h, s4hBearCE,  "-4H FVG CE", bear4hCol)
+    addLvl(dLbl, dCol, show4h, s4hBearBot, "-4H FVG B",  bear4hCol)
+    addLvl(dLbl, dCol, show15m, s15BullTop, "+15M FVG T",  bull15mCol)
+    addLvl(dLbl, dCol, show15m, s15BullCE,  "+15M FVG CE", bull15mCol)
+    addLvl(dLbl, dCol, show15m, s15BullBot, "+15M FVG B",  bull15mCol)
+    addLvl(dLbl, dCol, show15m, s15BearTop, "-15M FVG T",  bear15mCol)
+    addLvl(dLbl, dCol, show15m, s15BearCE,  "-15M FVG CE", bear15mCol)
+    addLvl(dLbl, dCol, show15m, s15BearBot, "-15M FVG B",  bear15mCol)
 
-    // OB rows.
-    table.cell(dash, 0, 9,  "  ", bgcolor = obBullWCol)
-    table.cell(dash, 1, 9,  "+W OB (bullish)",    text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 10, "  ", bgcolor = obBearWCol)
-    table.cell(dash, 1, 10, "-W OB (bearish)",    text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 11, "  ", bgcolor = obBullDCol)
-    table.cell(dash, 1, 11, "+D OB (bullish)",    text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 12, "  ", bgcolor = obBearDCol)
-    table.cell(dash, 1, 12, "-D OB (bearish)",    text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 13, "  ", bgcolor = obBull4hCol)
-    table.cell(dash, 1, 13, "+4H OB (bullish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 14, "  ", bgcolor = obBear4hCol)
-    table.cell(dash, 1, 14, "-4H OB (bearish)",   text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 15, "  ", bgcolor = obBull15mCol)
-    table.cell(dash, 1, 15, "+15M OB (bullish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 16, "  ", bgcolor = obBear15mCol)
-    table.cell(dash, 1, 16, "-15M OB (bearish)",  text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+    // OB levels.
+    addLvl(dLbl, dCol, showWOB,  oWBullTop, "+W OB T",  obBullWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBullCE,  "+W OB CE", obBullWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBullBot, "+W OB B",  obBullWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBearTop, "-W OB T",  obBearWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBearCE,  "-W OB CE", obBearWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBearBot, "-W OB B",  obBearWCol)
+    addLvl(dLbl, dCol, showDOB,  oDBullTop, "+D OB T",  obBullDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBullCE,  "+D OB CE", obBullDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBullBot, "+D OB B",  obBullDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBearTop, "-D OB T",  obBearDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBearCE,  "-D OB CE", obBearDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBearBot, "-D OB B",  obBearDCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBullTop, "+4H OB T",  obBull4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBullCE,  "+4H OB CE", obBull4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBullBot, "+4H OB B",  obBull4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBearTop, "-4H OB T",  obBear4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBearCE,  "-4H OB CE", obBear4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBearBot, "-4H OB B",  obBear4hCol)
+    addLvl(dLbl, dCol, show15mOB, o15BullTop, "+15M OB T",  obBull15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BullCE,  "+15M OB CE", obBull15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BullBot, "+15M OB B",  obBull15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BearTop, "-15M OB T",  obBear15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BearCE,  "-15M OB CE", obBear15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BearBot, "-15M OB B",  obBear15mCol)
+
+    int n = dLbl.size()
+    if n > 0
+        // One column per enabled level; 2 rows (label on top, swatch below).
+        dash := table.new(position = dashPos(), columns = n, rows = 2, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
+        for i = 0 to n - 1
+            table.cell(dash, i, 0, dLbl.get(i), text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
+            table.cell(dash, i, 1, "  ", bgcolor = dCol.get(i))
+    else
+        dash := na
 
 
 // ───────────────────────────── Alerts ──────────────────────────────────────
