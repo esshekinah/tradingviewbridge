@@ -216,11 +216,18 @@ maintainFVG(array<FVG> store) =>
             FVG f = store.get(i)
 
             // Top level ─ mitigated once price trades up to it (high >= top).
+            // On mitigation, freeze the line's right edge at THIS bar's time so
+            // it ends exactly where price hit it (not at the projected future
+            // endpoint it had while still active).
             if not f.topDone
                 bool hitTop = high >= f.top
                 if hitTop
                     f.topDone := true
-                if not hitTop and not na(f.topLn)
+                    if not na(f.topLn)
+                        line.set_x2(f.topLn, time)
+                        if not na(f.topLbl)
+                            label.set_x(f.topLbl, time)
+                else if not na(f.topLn)
                     line.set_x2(f.topLn, newRight)
                     if not na(f.topLbl)
                         label.set_x(f.topLbl, newRight)
@@ -230,7 +237,11 @@ maintainFVG(array<FVG> store) =>
                 bool hitBot = low <= f.bot
                 if hitBot
                     f.botDone := true
-                if not hitBot and not na(f.botLn)
+                    if not na(f.botLn)
+                        line.set_x2(f.botLn, time)
+                        if not na(f.botLbl)
+                            label.set_x(f.botLbl, time)
+                else if not na(f.botLn)
                     line.set_x2(f.botLn, newRight)
                     if not na(f.botLbl)
                         label.set_x(f.botLbl, newRight)
@@ -240,7 +251,11 @@ maintainFVG(array<FVG> store) =>
                 bool hitCE = low <= f.ce and high >= f.ce
                 if hitCE
                     f.ceDone := true
-                if not hitCE and not na(f.ceLn)
+                    if not na(f.ceLn)
+                        line.set_x2(f.ceLn, time)
+                        if not na(f.ceLbl)
+                            label.set_x(f.ceLbl, time)
+                else if not na(f.ceLn)
                     line.set_x2(f.ceLn, newRight)
                     if not na(f.ceLbl)
                         label.set_x(f.ceLbl, newRight)
