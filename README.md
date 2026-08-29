@@ -35,7 +35,9 @@ Both FVGs and OBs are drawn as **three horizontal lines** — **Top**, **CE** (m
 
 Each line extends to the right until **its own level is mitigated**, then it is **discontinued** — frozen at the bar where price re-entered it. The Top, CE, and Bottom of a single FVG are mitigated independently.
 
-**Mitigation is directional** — a level only counts as mitigated when price **re-enters the gap from the side it was left open**, not when the original impulse move created/extended it:
+**Mitigation only starts after confirmation** — the candles that *form* a zone can never mitigate it. Checking begins only once the **confirmation candle closes** (candle 3 for an FVG; the engulfing candle for an OB). This prevents, for example, a bullish OB from being instantly "mitigated" by the very bullish candle that engulfed it.
+
+**Mitigation is directional** — a level only counts as mitigated when price **re-enters the zone from the side it was left open**, not when the original impulse move created/extended it:
 
 - **Bullish FVG** (gap below price) → filled from **above** (price drops back down into it)
 - **Bearish FVG** (gap above price) → filled from **below** (price rallies back up into it)
