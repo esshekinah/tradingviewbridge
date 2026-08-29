@@ -1,8 +1,8 @@
 # Multi-TF FVG Indicator (4H + 15M)
 
-A TradingView **Pine Script v5** indicator that detects **Fair Value Gaps (FVGs)** on the **Weekly**, **Daily**, **4-hour** and **15-minute** timeframes and draws them on **any chart timeframe** you are currently viewing.
+A TradingView **Pine Script v5** indicator that detects **Fair Value Gaps (FVGs)** and **Order Blocks (OBs)** on the **Weekly**, **Daily**, **4-hour** and **15-minute** timeframes and draws them on **any chart timeframe** you are currently viewing.
 
-View a 1M or 5M chart and still see exactly where the higher-timeframe gaps sit.
+View a 1M or 5M chart and still see exactly where the higher-timeframe gaps and order blocks sit.
 
 ## What is a Fair Value Gap?
 
@@ -11,9 +11,17 @@ An FVG (a.k.a. imbalance) is a classic 3-candle pattern representing an untraded
 - **Bullish FVG** → `low[1] > high[3]` (gap between candle 1's low and candle 3's high)
 - **Bearish FVG** → `high[1] < low[3]` (gap between candle 1's high and candle 3's low)
 
-## How each FVG is drawn
+## What is an Order Block?
 
-Instead of a shaded rectangle, every FVG is drawn as **three horizontal lines** — **Top**, **CE** (midpoint), and **Bottom** — each with a text label at its right end:
+An OB is the last opposite-direction candle before an engulfing break (2-candle rule), using the candle **body** as the zone:
+
+- **Bullish OB** → previous candle is bearish (`close < open`) **and** the current candle **closes above** the previous candle's high → the previous candle's body is the bullish OB zone.
+- **Bearish OB** → previous candle is bullish (`close > open`) **and** the current candle **closes below** the previous candle's low → the previous candle's body is the bearish OB zone.
+- Zone (body only): **Top** = `max(open, close)`, **Bottom** = `min(open, close)`, **CE** = midpoint.
+
+## How each FVG / OB is drawn
+
+Both FVGs and OBs are drawn as **three horizontal lines** — **Top**, **CE** (midpoint), and **Bottom** — each with a text label at its right end (`+4H FVG Top`, `-D OB CE`, etc.):
 
 ```
 +W FVG Top / CE / Bottom      -W FVG Top / CE / Bottom
@@ -41,17 +49,18 @@ Each line extends to the right until **its own level is mitigated**, then it is 
 
 | Setting | Description |
 |---|---|
-| **Show W / D / 4H / 15M** | Toggle each of the four timeframes independently, each with its own timeframe input |
-| **Line colors** | Eight independent color inputs — Bullish (+) and Bearish (-) for **Weekly**, **Daily**, **4H**, **15M** — so each timeframe/direction can be styled separately |
-| **Line width** | Thickness of the level lines |
-| **Show/Hide Lines** | Per-category visibility — Top, CE, and Bottom can each be toggled independently for every timeframe × direction (**24 toggles total**, grouped in settings) |
-| **Max FVGs per set** | Trims oldest FVGs to keep the chart clean |
+| **Show FVGs / OBs per W / D / 4H / 15M** | Toggle FVGs and OBs independently for each of the four timeframes, each with its own timeframe input |
+| **FVG line colors** | Eight color inputs — Bullish (+)/Bearish (-) for W, D, 4H, 15M |
+| **OB line colors** | Eight separate color inputs — Bullish (+)/Bearish (-) for W, D, 4H, 15M — so OBs are visually distinct from FVGs |
+| **Line width / Mitigation by (Wick/Body)** | Shared by FVGs and OBs |
+| **Show/Hide Lines** | Per-category visibility — Top, CE, Bottom toggled independently for every timeframe × direction, separately for FVGs (**24 toggles**) and OBs (**24 toggles**) |
+| **Max FVGs per set** | Trims oldest FVGs/OBs per store to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
-| **Show text labels** | Toggle the right-end labels; configurable **text size** (Tiny / Small / Normal / Large) and **font** (Default / Monospace — Pine Script only supports these two families; a true Arial is not available, but Default is TradingView's Arial-like sans-serif) |
-| **Dashboard (color legend)** | An on-chart table (default top-right) showing what each line color means — W, D, 4H, 15M bull/bear. Configurable position, text size, background and text color; can be toggled off |
-| **Alerts** | Built-in `alertcondition` fires for new W / D / 4H / 15M FVGs |
+| **Show text labels** | Toggle the right-end labels; configurable **text size** and **font** (Default / Monospace — Pine has no Arial; Default is its Arial-like sans-serif) |
+| **Dashboard (color legend)** | An on-chart table (default top-right) showing what each line color means — FVGs and OBs for W, D, 4H, 15M bull/bear. Configurable position, text size, background and text color; can be toggled off |
+| **Alerts** | Built-in `alertcondition` fires for new W / D / 4H / 15M FVGs **and** OBs |
 
-The timeframes are configurable inputs, so you can repurpose the indicator for any two timeframes (e.g. Daily + 1H) without editing code.
+Both FVGs and OBs share the same directional Wick/Body mitigation (a level freezes when price re-enters the zone from the open side).
 
 ## Installation
 
