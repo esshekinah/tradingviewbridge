@@ -211,33 +211,33 @@ maintainFVG(array<FVG> store) =>
 
             // Top level ─ mitigated once price trades up to it (high >= top).
             if not f.topDone
-                if high >= f.top
+                bool hitTop = high >= f.top
+                if hitTop
                     f.topDone := true
-                else
-                    if not na(f.topLn)
-                        line.set_x2(f.topLn, newRight)
-                        if not na(f.topLbl)
-                            label.set_x(f.topLbl, newRight)
+                if not hitTop and not na(f.topLn)
+                    line.set_x2(f.topLn, newRight)
+                    if not na(f.topLbl)
+                        label.set_x(f.topLbl, newRight)
 
             // Bottom level ─ mitigated once price trades down to it (low <= bot).
             if not f.botDone
-                if low <= f.bot
+                bool hitBot = low <= f.bot
+                if hitBot
                     f.botDone := true
-                else
-                    if not na(f.botLn)
-                        line.set_x2(f.botLn, newRight)
-                        if not na(f.botLbl)
-                            label.set_x(f.botLbl, newRight)
+                if not hitBot and not na(f.botLn)
+                    line.set_x2(f.botLn, newRight)
+                    if not na(f.botLbl)
+                        label.set_x(f.botLbl, newRight)
 
             // CE level ─ mitigated when price trades through the midpoint.
             if not f.ceDone
-                if low <= f.ce and high >= f.ce
+                bool hitCE = low <= f.ce and high >= f.ce
+                if hitCE
                     f.ceDone := true
-                else
-                    if not na(f.ceLn)
-                        line.set_x2(f.ceLn, newRight)
-                        if not na(f.ceLbl)
-                            label.set_x(f.ceLbl, newRight)
+                if not hitCE and not na(f.ceLn)
+                    line.set_x2(f.ceLn, newRight)
+                    if not na(f.ceLbl)
+                        label.set_x(f.ceLbl, newRight)
 
 
 // When a 4H FVG has just confirmed, create a red left-pointing arrow for every
