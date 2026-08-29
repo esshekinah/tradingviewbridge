@@ -148,7 +148,7 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl) =>
     if show
         ln := line.new(x1 = t2mid, y1 = lvl, x2 = t2mid + 1, y2 = lvl, xloc = xloc.bar_time, color = col, style = line.style_solid, width = lineWidth)
         if showLbl
-            lb := label.new(x = t2mid + 1, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_label_left, size = lblSize())
+            lb := label.new(x = t2mid + 1, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_none, size = lblSize())
     [ln, lb]
 
 
