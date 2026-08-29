@@ -400,9 +400,20 @@ maintainFVG(array<FVG> store) =>
             int frozenX  = math.max(time, f.dispEnd)
             int activeX  = math.max(newRight, f.dispEnd)
 
+            // Mitigation may only START after the zone's CONFIRMATION candle has
+            // closed — never on the candles that form it:
+            //   FVG : confirmed when candle 3 closes.
+            //   OB  : confirmed when the engulfing candle closes.
+            // In both cases the confirming candle closes one HTF bar after
+            // dispEnd, i.e. at dispEnd + (dispEnd - dispStart) = 2*dispEnd -
+            // dispStart. Before that, lines just extend (never mitigate) so the
+            // forming/engulfing candle can't falsely mitigate the zone.
+            int  mitFrom   = 2 * f.dispEnd - f.dispStart
+            bool mitActive = time >= mitFrom
+
             // Top level.
             if not f.topDone
-                bool hitTop = f.isBull ? reachedFromAbove(f.top) : reachedFromBelow(f.top)
+                bool hitTop = mitActive and (f.isBull ? reachedFromAbove(f.top) : reachedFromBelow(f.top))
                 if hitTop
                     f.topDone := true
                     if not na(f.topLn)
@@ -417,7 +428,7 @@ maintainFVG(array<FVG> store) =>
 
             // Bottom level.
             if not f.botDone
-                bool hitBot = f.isBull ? reachedFromAbove(f.bot) : reachedFromBelow(f.bot)
+                bool hitBot = mitActive and (f.isBull ? reachedFromAbove(f.bot) : reachedFromBelow(f.bot))
                 if hitBot
                     f.botDone := true
                     if not na(f.botLn)
@@ -431,7 +442,7 @@ maintainFVG(array<FVG> store) =>
 
             // CE (midpoint) level.
             if not f.ceDone
-                bool hitCE = f.isBull ? reachedFromAbove(f.ce) : reachedFromBelow(f.ce)
+                bool hitCE = mitActive and (f.isBull ? reachedFromAbove(f.ce) : reachedFromBelow(f.ce))
                 if hitCE
                     f.ceDone := true
                     if not na(f.ceLn)
