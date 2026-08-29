@@ -18,8 +18,6 @@ indicator("Multi-TF FVG (W + D + 4H + 15M)", overlay=true, max_lines_count=500, 
 //   +4H FVG Top / CE / Bottom
 //   -15M FVG Top / CE / Bottom
 //
-// Proximity arrows compare Weekly / Daily / 4H levels against 15M levels.
-//
 // Each line extends to the right until its own level is mitigated (touched by
 // price), at which point the line is discontinued — frozen at the bar where
 // the mitigation happened.
@@ -96,13 +94,6 @@ s15BearTop = input.bool(true, "Top",    group=grp11, inline="r")
 s15BearCE  = input.bool(true, "CE",     group=grp11, inline="r")
 s15BearBot = input.bool(true, "Bottom", group=grp11, inline="r")
 
-grp6 = "Proximity Arrow"
-showArrows    = input.bool(true, "Show proximity arrows", group=grp6, tooltip="Draw a red left-pointing arrow whenever any Weekly / Daily / 4H level (Top/CE/Bottom) is within the threshold of any same-direction 15M level. The arrow is removed if either linked level is mitigated.")
-arrowThresh   = input.float(4.0, "Arrow max distance (points)", minval=0.0, step=0.1, group=grp6)
-arrowCol      = input.color(color.red, "Arrow color", group=grp6)
-arrowWidth    = input.int(2, "Arrow width", minval=1, maxval=5, group=grp6)
-arrowLen      = input.int(20, "Arrow length (bars)", minval=1, maxval=200, group=grp6, tooltip="How far to the right of the lines the arrow's tail extends. The arrowhead points left toward the two close lines.")
-
 grp4 = "General"
 maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100, group=grp4)
 extendBars    = input.int(30,  "Extend lines (bars)",      minval=0, maxval=500, group=grp4)
@@ -138,17 +129,6 @@ type FVG
     bool  topDone
     bool  ceDone
     bool  botDone
-
-
-// A proximity arrow linking a 4H level to a nearby same-direction 15M level.
-// `f4`/`f15` are the two FVGs; `lvl4`/`lvl15` are the level indices
-// (0 = Top, 1 = CE, 2 = Bottom) so we can watch each side's mitigation flag.
-type Arrow
-    line ln
-    FVG  f4
-    int  lvl4
-    FVG  f15
-    int  lvl15
 
 
 // ─────────────── Request 3-candle data from a higher timeframe ──────────────
@@ -191,15 +171,6 @@ dashPos() =>
     dashPosInp == "Top Left" ? position.top_left : dashPosInp == "Bottom Right" ? position.bottom_right : dashPosInp == "Bottom Left" ? position.bottom_left : dashPosInp == "Middle Right" ? position.middle_right : position.top_right
 dashSize() =>
     dashSizeInp == "Tiny" ? size.tiny : dashSizeInp == "Normal" ? size.normal : dashSizeInp == "Large" ? size.large : size.small
-
-
-// Price of a level by index: 0 = Top, 1 = CE, 2 = Bottom.
-lvlPrice(FVG f, int idx) =>
-    idx == 0 ? f.top : idx == 1 ? f.ce : f.bot
-
-// Whether a level (by index) has been mitigated (its *Done flag).
-lvlDone(FVG f, int idx) =>
-    idx == 0 ? f.topDone : idx == 1 ? f.ceDone : f.botDone
 
 
 // Create one horizontal level line + right-end label. Returns [line, label].
@@ -327,45 +298,11 @@ maintainFVG(array<FVG> store) =>
     true
 
 
-// When a 4H FVG has just confirmed, create a red left-pointing arrow for every
-// (4H level, 15M level) pair — same direction, 15M formed during the 4H
-// displacement window — whose prices are within `thresh` points. The arrow is
-// stored so it can be removed later if either linked level is mitigated.
-addArrows(array<Arrow> arrows, FVG f4, array<FVG> m15, float thresh, int rightTime, color col, int width) =>
-    if m15.size() > 0
-        for i = 0 to m15.size() - 1
-            FVG f15 = m15.get(i)
-            if f15.isBull == f4.isBull and f15.dispStart >= f4.dispStart and f15.dispStart < f4.dispEnd
-                for a4 = 0 to 2
-                    for a15 = 0 to 2
-                        float p4  = lvlPrice(f4,  a4)
-                        float p15 = lvlPrice(f15, a15)
-                        if not lvlDone(f4, a4) and not lvlDone(f15, a15) and math.abs(p4 - p15) <= thresh
-                            float mid = (p4 + p15) / 2.0
-                            // Arrowhead on the LEFT (points toward the lines);
-                            // tail extends `arrowLen` bars to the right.
-                            line al = line.new(x1 = rightTime, y1 = mid, x2 = rightTime + arrowLen * (timeframe.in_seconds() * 1000), y2 = mid, xloc = xloc.bar_time, color = col, width = width, style = line.style_arrow_left)
-                            arrows.push(Arrow.new(al, f4, a4, f15, a15))
-    true
-
-
-// Remove any arrow whose 4H or 15M linked level has been mitigated.
-maintainArrows(array<Arrow> arrows) =>
-    if arrows.size() > 0
-        for i = arrows.size() - 1 to 0
-            Arrow a = arrows.get(i)
-            if lvlDone(a.f4, a.lvl4) or lvlDone(a.f15, a.lvl15)
-                line.delete(a.ln)
-                arrows.remove(i)
-    true
-
-
 // ───────────────────────────── Storage ─────────────────────────────────────
-var array<FVG>   fvgW    = array.new<FVG>()
-var array<FVG>   fvgD    = array.new<FVG>()
-var array<FVG>   fvg4h   = array.new<FVG>()
-var array<FVG>   fvg15m  = array.new<FVG>()
-var array<Arrow> arrows  = array.new<Arrow>()
+var array<FVG> fvgW   = array.new<FVG>()
+var array<FVG> fvgD   = array.new<FVG>()
+var array<FVG> fvg4h  = array.new<FVG>()
+var array<FVG> fvg15m = array.new<FVG>()
 
 
 // ─────────────────────── Pull HTF streams ──────────────────────────────────
@@ -381,45 +318,24 @@ int ms15 = timeframe.in_seconds(tf15m) * 1000
 
 
 // ─────────────────────────── Run detection ─────────────────────────────────
-// Detect and store 15M FVGs FIRST. A 4H FVG confirms ~8h after its displacement
-// candle, so the 15M FVGs that formed *during* that candle already exist in the
-// store by the time the 4H FVG is confirmed (used by the proximity arrows).
 if show15m
     detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol, s15BullTop, s15BullCE, s15BullBot, s15BearTop, s15BearCE, s15BearBot)
 maintainFVG(fvg15m)
 
-int rightT = time + extendBars * (timeframe.in_seconds() * 1000)
-
 // Weekly.
-bool newW = false
-if showW or showArrows
-    [dW, bW, tW, bullW, dsW, deW] = detectFVG(fvgW, H1_W, L1_W, H3_W, L3_W, T2_W, msW, isNewW, "W", showW, showLabels and showW, bullWCol, bearWCol, sWBullTop, sWBullCE, sWBullBot, sWBearTop, sWBearCE, sWBearBot)
-    newW := dW
+if showW
+    detectFVG(fvgW, H1_W, L1_W, H3_W, L3_W, T2_W, msW, isNewW, "W", showW, showLabels and showW, bullWCol, bearWCol, sWBullTop, sWBullCE, sWBullBot, sWBearTop, sWBearCE, sWBearBot)
 maintainFVG(fvgW)
-if showArrows and newW and fvgW.size() > 0
-    addArrows(arrows, fvgW.last(), fvg15m, arrowThresh, rightT, arrowCol, arrowWidth)
 
 // Daily.
-bool newD = false
-if showD or showArrows
-    [dD, bD, tD, bullD, dsD, deD] = detectFVG(fvgD, H1_D, L1_D, H3_D, L3_D, T2_D, msD, isNewD, "D", showD, showLabels and showD, bullDCol, bearDCol, sDBullTop, sDBullCE, sDBullBot, sDBearTop, sDBearCE, sDBearBot)
-    newD := dD
+if showD
+    detectFVG(fvgD, H1_D, L1_D, H3_D, L3_D, T2_D, msD, isNewD, "D", showD, showLabels and showD, bullDCol, bearDCol, sDBullTop, sDBullCE, sDBullBot, sDBearTop, sDBearCE, sDBearBot)
 maintainFVG(fvgD)
-if showArrows and newD and fvgD.size() > 0
-    addArrows(arrows, fvgD.last(), fvg15m, arrowThresh, rightT, arrowCol, arrowWidth)
 
 // 4H.
-bool new4h = false
-if show4h or showArrows
-    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol, s4hBullTop, s4hBullCE, s4hBullBot, s4hBearTop, s4hBearCE, s4hBearBot)
-    new4h := d4
+if show4h
+    detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol, s4hBullTop, s4hBullCE, s4hBullBot, s4hBearTop, s4hBearCE, s4hBearBot)
 maintainFVG(fvg4h)
-// Proximity arrows: on a fresh W/D/4H FVG, link its levels to nearby 15M levels.
-if showArrows and new4h and fvg4h.size() > 0
-    addArrows(arrows, fvg4h.last(), fvg15m, arrowThresh, rightT, arrowCol, arrowWidth)
-
-// Remove arrows whose linked levels have since been mitigated.
-maintainArrows(arrows)
 
 
 // ─────────────────────────── Dashboard (legend) ────────────────────────────
@@ -429,7 +345,7 @@ var table dash = na
 if showDash and barstate.islast
     if not na(dash)
         table.delete(dash)
-    dash := table.new(position = dashPos(), columns = 2, rows = 10, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
+    dash := table.new(position = dashPos(), columns = 2, rows = 9, bgcolor = dashBgCol, border_color = color.new(color.gray, 50), border_width = 1, frame_color = color.new(color.gray, 40), frame_width = 1)
 
     // Header
     table.cell(dash, 0, 0, "FVG Legend", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
@@ -452,8 +368,6 @@ if showDash and barstate.islast
     table.cell(dash, 1, 7, "+15M FVG (bullish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
     table.cell(dash, 0, 8, "  ", bgcolor = bear15mCol)
     table.cell(dash, 1, 8, "-15M FVG (bearish)", text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
-    table.cell(dash, 0, 9, "  ", bgcolor = arrowCol)
-    table.cell(dash, 1, 9, "Proximity arrow",    text_color = dashTxtCol, text_size = dashSize(), text_font_family = lblFont())
 
 
 // ───────────────────────────── Alerts ──────────────────────────────────────

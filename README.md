@@ -48,7 +48,7 @@ Each line extends to the right until **its own level is mitigated**, then it is 
 | **Max FVGs per set** | Trims oldest FVGs to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
 | **Show text labels** | Toggle the right-end labels; configurable **text size** (Tiny / Small / Normal / Large) and **font** (Default / Monospace — Pine Script only supports these two families; a true Arial is not available, but Default is TradingView's Arial-like sans-serif) |
-| **Dashboard (color legend)** | An on-chart table (default top-right) showing what each line/marker color means — W, D, 4H, 15M bull/bear, and the proximity arrow. Configurable position, text size, background and text color; can be toggled off |
+| **Dashboard (color legend)** | An on-chart table (default top-right) showing what each line color means — W, D, 4H, 15M bull/bear. Configurable position, text size, background and text color; can be toggled off |
 | **Alerts** | Built-in `alertcondition` fires for new W / D / 4H / 15M FVGs |
 
 The timeframes are configurable inputs, so you can repurpose the indicator for any two timeframes (e.g. Daily + 1H) without editing code.
@@ -59,15 +59,6 @@ The timeframes are configurable inputs, so you can repurpose the indicator for a
 2. Paste in the contents of [`multi_tf_fvg.pine`](./multi_tf_fvg.pine).
 3. Click **Add to chart**.
 4. Adjust colors/timeframes via the indicator settings (⚙️).
-
-## Proximity arrows
-
-When any **Weekly, Daily, or 4H level** (Top / CE / Bottom) sits within a configurable distance of any **same-direction 15M level**, a **red left-pointing arrow** is drawn at the midpoint price between the two close lines, pointing left toward them. Each higher timeframe (W, D, 4H) is compared independently against 15M.
-
-- **Arrow max distance (points)** — threshold in raw price points (default `4`).
-- Only **same-direction** pairs are considered, and only when the 15M FVG formed during the higher-timeframe displacement window.
-- The arrow is **removed automatically if either linked level is mitigated** — as soon as price touches the higher-timeframe level or the 15M level it connects, the arrow disappears.
-- Color, width, and length (how far the tail extends to the right) are configurable.
 
 ## Notes
 
