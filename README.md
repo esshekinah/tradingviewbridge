@@ -1,8 +1,8 @@
 # Multi-TF FVG Indicator (4H + 15M)
 
-A TradingView **Pine Script v5** indicator that detects **Fair Value Gaps (FVGs)** on the **4-hour** and **15-minute** timeframes and draws them on **any chart timeframe** you are currently viewing.
+A TradingView **Pine Script v5** indicator that detects **Fair Value Gaps (FVGs)** on the **Weekly**, **Daily**, **4-hour** and **15-minute** timeframes and draws them on **any chart timeframe** you are currently viewing.
 
-View a 1M or 5M chart and still see exactly where the higher-timeframe 4H and 15M gaps sit.
+View a 1M or 5M chart and still see exactly where the higher-timeframe gaps sit.
 
 ## What is a Fair Value Gap?
 
@@ -16,13 +16,14 @@ An FVG (a.k.a. imbalance) is a classic 3-candle pattern representing an untraded
 Instead of a shaded rectangle, every FVG is drawn as **three horizontal lines** — **Top**, **CE** (midpoint), and **Bottom** — each with a text label at its right end:
 
 ```
-+4H FVG Top      -4H FVG Top       +15M FVG Top      -15M FVG Top
-+4H FVG CE       -4H FVG CE        +15M FVG CE       -15M FVG CE
-+4H FVG Bottom   -4H FVG Bottom    +15M FVG Bottom   -15M FVG Bottom
++W FVG Top / CE / Bottom      -W FVG Top / CE / Bottom
++D FVG Top / CE / Bottom      -D FVG Top / CE / Bottom
++4H FVG Top / CE / Bottom     -4H FVG Top / CE / Bottom
++15M FVG Top / CE / Bottom    -15M FVG Top / CE / Bottom
 ```
 
-- `+` = **bullish** FVG (drawn in **white** by default)
-- `-` = **bearish** FVG (drawn in **red** by default)
+- `+` = **bullish** FVG, `-` = **bearish** FVG
+- Each timeframe/direction has its own configurable color
 
 Each line extends to the right until **its own level is mitigated**, then it is **discontinued** — frozen at the bar where price re-entered it. The Top, CE, and Bottom of a single FVG are mitigated independently.
 
@@ -40,15 +41,15 @@ Each line extends to the right until **its own level is mitigated**, then it is 
 
 | Setting | Description |
 |---|---|
-| **Show 4H / 15M** | Toggle each timeframe independently |
-| **Line colors** | Four independent color inputs — **4H Bullish (+)**, **4H Bearish (-)**, **15M Bullish (+)**, **15M Bearish (-)** — so each timeframe/direction can be styled separately (defaults: 4H white/red, 15M aqua/orange) |
+| **Show W / D / 4H / 15M** | Toggle each of the four timeframes independently, each with its own timeframe input |
+| **Line colors** | Eight independent color inputs — Bullish (+) and Bearish (-) for **Weekly**, **Daily**, **4H**, **15M** — so each timeframe/direction can be styled separately |
 | **Line width** | Thickness of the level lines |
-| **Show/Hide Lines** | Per-category visibility — Top, CE, and Bottom can each be toggled independently for **4H Bullish**, **4H Bearish**, **15M Bullish**, and **15M Bearish** (12 toggles total, grouped in settings) |
+| **Show/Hide Lines** | Per-category visibility — Top, CE, and Bottom can each be toggled independently for every timeframe × direction (**24 toggles total**, grouped in settings) |
 | **Max FVGs per set** | Trims oldest FVGs to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
 | **Show text labels** | Toggle the right-end labels; configurable **text size** (Tiny / Small / Normal / Large) and **font** (Default / Monospace — Pine Script only supports these two families; a true Arial is not available, but Default is TradingView's Arial-like sans-serif) |
-| **Dashboard (color legend)** | An on-chart table (default top-right) showing what each line/marker color means — 4H bull/bear, 15M bull/bear, and the proximity arrow. Configurable position, text size, background and text color; can be toggled off |
-| **Alerts** | Built-in `alertcondition` fires for new 4H / 15M FVGs |
+| **Dashboard (color legend)** | An on-chart table (default top-right) showing what each line/marker color means — W, D, 4H, 15M bull/bear, and the proximity arrow. Configurable position, text size, background and text color; can be toggled off |
+| **Alerts** | Built-in `alertcondition` fires for new W / D / 4H / 15M FVGs |
 
 The timeframes are configurable inputs, so you can repurpose the indicator for any two timeframes (e.g. Daily + 1H) without editing code.
 
@@ -61,11 +62,11 @@ The timeframes are configurable inputs, so you can repurpose the indicator for a
 
 ## Proximity arrows
 
-When any **4H level** (Top / CE / Bottom) sits within a configurable distance of any **same-direction 15M level**, a **red left-pointing arrow** is drawn at the midpoint price between the two close lines, pointing left toward them.
+When any **Weekly, Daily, or 4H level** (Top / CE / Bottom) sits within a configurable distance of any **same-direction 15M level**, a **red left-pointing arrow** is drawn at the midpoint price between the two close lines, pointing left toward them. Each higher timeframe (W, D, 4H) is compared independently against 15M.
 
 - **Arrow max distance (points)** — threshold in raw price points (default `4`).
-- Only **same-direction** pairs are considered, and only when the 15M FVG formed during the 4H displacement window.
-- The arrow is **removed automatically if either linked level is mitigated** — as soon as price touches the 4H level or the 15M level it connects, the arrow disappears.
+- Only **same-direction** pairs are considered, and only when the 15M FVG formed during the higher-timeframe displacement window.
+- The arrow is **removed automatically if either linked level is mitigated** — as soon as price touches the higher-timeframe level or the 15M level it connects, the arrow disappears.
 - Color, width, and length (how far the tail extends to the right) are configurable.
 
 ## Notes
