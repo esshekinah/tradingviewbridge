@@ -26,11 +26,10 @@ show15m       = input.bool(true,  "Show 15M FVGs",                group=grp2)
 tf15m         = input.timeframe("15", "15M Timeframe",            group=grp2)
 bull15mCol    = input.color(color.new(color.aqua,   70), "15M Bullish", group=grp2, inline="c15")
 bear15mCol    = input.color(color.new(color.orange, 70), "15M Bearish", group=grp2, inline="c15")
-only15mIn4h   = input.bool(true,  "Only 15M FVGs inside a 4H FVG (confluence)", group=grp2, tooltip="When on, a 15M FVG is drawn only if any part of its range overlaps an active (unmitigated) 4H FVG zone.")
 
 grp3 = "Signal Settings"
 showSignals   = input.bool(true, "Show Buy/Sell signals", group=grp3)
-signalThresh  = input.float(4.0, "Max line distance (price points)", minval=0.0, step=0.1, group=grp3, tooltip="When any 4H FVG level (Bottom / CE / Top) is within this many price points of any 15M FVG level, a Buy (bullish) or Sell (bearish) signal is plotted. Set to match the instrument's scale — e.g. ~4 on an index like US Tech 100.")
+signalThresh  = input.float(4.0, "Max line distance (price points)", minval=0.0, step=0.1, group=grp3, tooltip="A signal fires when a same-direction 15M FVG formed DURING the 4H displacement candle AND any 4H level (Bottom/CE/Top) is within this many price points of any 15M level. Set to match the instrument's scale — e.g. ~4 on an index like US Tech 100.")
 buyCol        = input.color(color.lime, "Buy signal",  group=grp3, inline="sig")
 sellCol       = input.color(color.red,  "Sell signal", group=grp3, inline="sig")
 
@@ -49,6 +48,8 @@ type FVG
     float bot
     bool  isBull
     bool  filled
+    int   dispStart   // displacement candle open time (ms)
+    int   dispEnd     // displacement candle close time (ms) = start + TF duration
 
 
 // ─────────────── Request 3-candle data from a higher timeframe ──────────────
@@ -61,82 +62,78 @@ reqTF(simple string tf) =>
          lookahead=barmerge.lookahead_off)
 
 
-// Returns true if the price range [bot, top] overlaps any active (unfilled)
-// FVG in the given confluence set THAT MATCHES the given direction.
-// Overlap = "fully inside" OR "partly inside". A bullish 15M FVG only pairs
-// with a bullish 4H FVG, and a bearish 15M FVG only with a bearish 4H FVG.
-overlapsAny(array<FVG> conf, float bot, float top, bool isBull) =>
-    bool hit = false
-    if conf.size() > 0
-        for i = 0 to conf.size() - 1
-            FVG z = conf.get(i)
-            // Two ranges overlap when each starts before the other ends.
-            if not z.filled and z.isBull == isBull and bot <= z.top and z.bot <= top
-                hit := true
-    hit
-
-
 // CE (Consequent Encroachment) = midpoint of an FVG.
 ce(float top, float bot) => (top + bot) / 2.0
 
 
-// Compares the 3 levels (Bottom, CE, Top) of a 15M FVG against the 3 levels of
-// every active 4H FVG OF THE SAME DIRECTION. Returns true if ANY 4H level is
-// within `thresh` price points of ANY 15M level (9 pairwise comparisons).
-levelsAligned(array<FVG> conf, float bot15, float ce15, float top15, float thresh, bool isBull) =>
-    bool aligned = false
-    if conf.size() > 0
-        for i = 0 to conf.size() - 1
-            FVG z = conf.get(i)
-            if not z.filled and z.isBull == isBull
-                float ce4 = ce(z.top, z.bot)
-                // 3 x 3 = 9 line-to-line distance checks.
-                bool near = math.abs(z.bot - bot15) <= thresh or math.abs(z.bot - ce15) <= thresh or math.abs(z.bot - top15) <= thresh or math.abs(ce4 - bot15) <= thresh or math.abs(ce4 - ce15) <= thresh or math.abs(ce4 - top15) <= thresh or math.abs(z.top - bot15) <= thresh or math.abs(z.top - ce15) <= thresh or math.abs(z.top - top15) <= thresh
-                if near
-                    aligned := true
-    aligned
+// Returns true if the given 4H FVG levels are within `thresh` price points of
+// the given 15M FVG levels (any of the 9 Bottom/CE/Top line-to-line distances).
+levelsNear(float bot4, float ce4, float top4, float bot15, float ce15, float top15, float thresh) =>
+    math.abs(bot4 - bot15) <= thresh or math.abs(bot4 - ce15) <= thresh or math.abs(bot4 - top15) <= thresh or math.abs(ce4 - bot15) <= thresh or math.abs(ce4 - ce15) <= thresh or math.abs(ce4 - top15) <= thresh or math.abs(top4 - bot15) <= thresh or math.abs(top4 - ce15) <= thresh or math.abs(top4 - top15) <= thresh
+
+
+// When a 4H FVG has just confirmed, scan the stored 15M FVGs and return true if
+// ANY same-direction 15M FVG (a) formed DURING this 4H FVG's displacement candle
+// window and (b) has a level within `thresh` price points of a 4H level.
+// This runs on 4H confirmation because a 4H FVG is only known ~8h AFTER its
+// displacement candle — long after the 15M FVGs inside it have already formed.
+signalOn4hConfirm(array<FVG> m15, float bot4, float top4, int dStart, int dEnd, bool isBull, float thresh) =>
+    bool hit = false
+    if m15.size() > 0
+        float ce4 = ce(top4, bot4)
+        for i = 0 to m15.size() - 1
+            FVG f = m15.get(i)
+            if f.isBull == isBull and f.dispStart >= dStart and f.dispStart < dEnd
+                if levelsNear(bot4, ce4, top4, f.bot, ce(f.top, f.bot), f.top, thresh)
+                    hit := true
+    hit
 
 
 // ─────────────────────── FVG detection + drawing ───────────────────────────
-// Detects a new FVG on the given HTF stream and appends a box to the array.
-// If requireConf is true, the FVG is only drawn when its range overlaps an
-// active FVG in the `conf` set (used to keep only 15M FVGs inside 4H FVGs).
-detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, bool isNew, color bullCol, color bearCol, string tfLabel, bool showLbl, array<FVG> conf, bool requireConf, bool visible) =>
+// Detects a new FVG on the given HTF stream and appends it to `store`.
+// `tfMs` is the duration of one bar of this FVG's timeframe, in milliseconds,
+// used to bound the displacement candle window [t2mid, t2mid + tfMs).
+// Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for the new FVG so
+// the caller can run cross-timeframe signal logic on confirmation.
+detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, color bullCol, color bearCol, string tfLabel, bool showLbl, bool visible) =>
     bool  drawn   = false
     float newTop  = na
     float newBot  = na
     bool  newBull = false
+    int   newDS   = na
+    int   newDE   = na
     if isNew and not na(hh1) and not na(hh3)
         bool bull = ll1 > hh3          // gap up: current low above old high
         bool bear = hh1 < ll3          // gap down: current high below old low
         if bull or bear
             float top = bull ? ll1 : ll3
             float bot = bull ? hh3 : hh1
-            // Confluence filter: skip 15M FVGs not overlapping a SAME-DIRECTION 4H FVG.
-            bool passConf = requireConf ? overlapsAny(conf, bot, top, bull) : true
-            if passConf
-                drawn   := true
-                newTop  := top
-                newBot  := bot
-                newBull := bull
-                color col      = bull ? bullCol : bearCol
-                // When not visible (4H used only as a hidden confluence filter),
-                // draw the box fully transparent so it still exists for logic.
-                color bgCol    = visible ? col : color.new(col, 100)
-                color bordCol  = visible ? color.new(col, 0) : color.new(col, 100)
-                box b = box.new(left = t2mid, top = top, right = t2mid + 1, bottom = bot, xloc = xloc.bar_time, border_color = bordCol, border_width = borderWidth, bgcolor = bgCol)
-                if showLbl
-                    box.set_text(b, tfLabel + (bull ? " Bull FVG" : " Bear FVG"))
-                    box.set_text_size(b, size.tiny)
-                    box.set_text_color(b, color.new(color.gray, 20))
-                    box.set_text_halign(b, text.align_left)
-                    box.set_text_valign(b, text.align_center)
-                store.push(FVG.new(b, top, bot, bull, false))
-                // Trim oldest
-                if store.size() > maxFvgs
-                    FVG old = store.shift()
-                    box.delete(old.bx)
-    [drawn, newBot, newTop, newBull]
+            // Displacement candle window = [t2mid, t2mid + tfMs).
+            int dStart = t2mid
+            int dEnd   = t2mid + tfMs
+            drawn   := true
+            newTop  := top
+            newBot  := bot
+            newBull := bull
+            newDS   := dStart
+            newDE   := dEnd
+            color col      = bull ? bullCol : bearCol
+            // When not visible, draw transparent so the box still exists for logic.
+            color bgCol    = visible ? col : color.new(col, 100)
+            color bordCol  = visible ? color.new(col, 0) : color.new(col, 100)
+            box b = box.new(left = t2mid, top = top, right = t2mid + 1, bottom = bot, xloc = xloc.bar_time, border_color = bordCol, border_width = borderWidth, bgcolor = bgCol)
+            if showLbl
+                box.set_text(b, tfLabel + (bull ? " Bull FVG" : " Bear FVG"))
+                box.set_text_size(b, size.tiny)
+                box.set_text_color(b, color.new(color.gray, 20))
+                box.set_text_halign(b, text.align_left)
+                box.set_text_valign(b, text.align_center)
+            store.push(FVG.new(b, top, bot, bull, false, dStart, dEnd))
+            // Trim oldest
+            if store.size() > maxFvgs
+                FVG old = store.shift()
+                box.delete(old.bx)
+    [drawn, newBot, newTop, newBull, newDS, newDE]
 
 
 // Keeps FVG boxes extending to the right, and removes mitigated ones.
@@ -165,42 +162,52 @@ var array<FVG> fvg15m = array.new<FVG>()
 [H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, isNew4h]     = reqTF(tf4h)
 [H1_15, L1_15, H3_15, L3_15, T2_15, isNew15]     = reqTF(tf15m)
 
+// Bar duration (ms) for each configured timeframe — used to bound the
+// displacement candle window [start, start + duration).
+int ms4h = timeframe.in_seconds(tf4h)  * 1000
+int ms15 = timeframe.in_seconds(tf15m) * 1000
+
 
 // ─────────────────────────── Run detection ─────────────────────────────────
-// IMPORTANT: process 4H first so its zones exist when we filter 15M FVGs.
-// We also maintain (mitigate/extend) 4H BEFORE the 15M confluence check so a
-// 15M FVG is only kept when it overlaps a still-active 4H zone.
-// Detect 4H FVGs whenever they're shown OR needed as a confluence filter for 15M.
-if show4h or only15mIn4h
-    detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, isNew4h, bull4hCol, bear4hCol, "4H", showLabels and show4h, fvg4h, false, show4h)
-maintainFVG(fvg4h)
-
-bool  drew15m  = false
-float new15Bot = na
-float new15Top = na
-bool  new15Bull = false
+// Detect and store 15M FVGs FIRST. A 4H FVG confirms ~8h after its displacement
+// candle, so the 15M FVGs that formed *during* that candle already exist in the
+// store by the time the 4H FVG is confirmed. Signals are therefore emitted on
+// 4H confirmation, scanning backward over the stored 15M FVGs.
 if show15m
-    [d15, nb15, nt15, bull15] = detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, isNew15, bull15mCol, bear15mCol, "15M", showLabels, fvg4h, only15mIn4h, true)
-    drew15m   := d15
-    new15Bot  := nb15
-    new15Top  := nt15
-    new15Bull := bull15
+    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, bull15mCol, bear15mCol, "15M", showLabels, true)
 maintainFVG(fvg15m)
+
+// Detect 4H FVGs whenever they're shown OR needed for signals.
+bool  new4h    = false
+float n4Bot    = na
+float n4Top    = na
+bool  n4Bull   = false
+int   n4DS     = na
+int   n4DE     = na
+if show4h or showSignals
+    [d4, b4, t4, bull4, ds4, de4] = detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, bull4hCol, bear4hCol, "4H", showLabels and show4h, show4h)
+    new4h  := d4
+    n4Bot  := b4
+    n4Top  := t4
+    n4Bull := bull4
+    n4DS   := ds4
+    n4DE   := de4
+maintainFVG(fvg4h)
 
 
 // ─────────────────────── Buy / Sell signal logic ───────────────────────────
-// When a new 15M FVG is created, compare its Bottom / CE / Top levels against
-// the Bottom / CE / Top levels of every active 4H FVG. If any pair of lines is
-// within `signalThresh` price points, fire a signal:
-//   Buy  → bullish 15M FVG   |   Sell → bearish 15M FVG
+// When a 4H FVG confirms, scan stored 15M FVGs. If any SAME-DIRECTION 15M FVG
+// (a) formed DURING this 4H FVG's displacement candle window, and (b) has a
+// level (Bottom / CE / Top) within `signalThresh` price points of a 4H level,
+// fire a signal:
+//   Buy  → bullish 4H+15M pair   |   Sell → bearish pair
 bool buySignal  = false
 bool sellSignal = false
-if showSignals and drew15m and not na(new15Bot)
-    float ce15 = ce(new15Top, new15Bot)
-    bool aligned = levelsAligned(fvg4h, new15Bot, ce15, new15Top, signalThresh, new15Bull)
+if showSignals and new4h and not na(n4Bot)
+    bool aligned = signalOn4hConfirm(fvg15m, n4Bot, n4Top, n4DS, n4DE, n4Bull, signalThresh)
     if aligned
-        buySignal  := new15Bull
-        sellSignal := not new15Bull
+        buySignal  := n4Bull
+        sellSignal := not n4Bull
 
 plotshape(buySignal,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=buyCol,  size=size.small, text="BUY",  textcolor=buyCol)
 plotshape(sellSignal, title="Sell", style=shape.triangledown, location=location.abovebar, color=sellCol, size=size.small, text="SELL", textcolor=sellCol)
@@ -208,6 +215,6 @@ plotshape(sellSignal, title="Sell", style=shape.triangledown, location=location.
 
 // ───────────────────────────── Alerts ──────────────────────────────────────
 alertcondition(isNew4h and show4h,  "New 4H FVG",  "A new 4H Fair Value Gap has formed")
-alertcondition(drew15m,             "New 15M FVG in 4H", "A new 15M FVG formed inside a 4H FVG zone")
-alertcondition(buySignal,           "Buy Signal",  "4H/15M FVG levels aligned - BUY")
-alertcondition(sellSignal,          "Sell Signal", "4H/15M FVG levels aligned - SELL")
+alertcondition(isNew15 and show15m, "New 15M FVG",  "A new 15M Fair Value Gap has formed")
+alertcondition(buySignal,           "Buy Signal",  "4H+15M FVG confluence during formation - BUY")
+alertcondition(sellSignal,          "Sell Signal", "4H+15M FVG confluence during formation - SELL")
