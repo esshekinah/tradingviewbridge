@@ -1,4 +1,4 @@
-# Multi-TF FVG Indicator (4H + 15M)
+# Bottom Top Tick | Emmanuel
 
 A TradingView **Pine Script v5** indicator that detects **Fair Value Gaps (FVGs)** and **Order Blocks (OBs)** on the **Weekly**, **Daily**, **4-hour** and **15-minute** timeframes and draws them on **any chart timeframe** you are currently viewing.
 

@@ -1,5 +1,5 @@
 //@version=5
-indicator("Multi-TF FVG + OB (W + D + 4H + 15M)", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("Bottom Top Tick | Emmanuel", overlay=true, max_lines_count=500, max_labels_count=500)
 
 // ============================================================================
 // Multi-Timeframe FVG + Order Block Indicator
