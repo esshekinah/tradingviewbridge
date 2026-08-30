@@ -31,7 +31,8 @@ Both FVGs and OBs are drawn as **three horizontal lines** — **Top**, **CE** (m
 ```
 
 - `+` = **bullish** FVG, `-` = **bearish** FVG
-- Each timeframe/direction has its own configurable color (default **5% opacity / 95% transparent** so lines are subtle; the right-end label text stays fully opaque for readability)
+- Each timeframe/direction has its own configurable line color (default **5% opacity / 95% transparent** so lines are subtle)
+- Label **text color is configured separately** from the line color — one for bullish (+), one for bearish (-) — so labels stay readable regardless of how faint the lines are
 
 Each line extends to the right until **its own level is mitigated**, then it is **discontinued** — frozen at the bar where price re-entered it. The Top, CE, and Bottom of a single FVG are mitigated independently.
 
@@ -59,6 +60,7 @@ Each line extends to the right until **its own level is mitigated**, then it is 
 | **Max FVGs per set** | Trims oldest FVGs/OBs per store to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
 | **Show text labels** | Toggle the right-end labels; configurable **text size** and **font** (Default / Monospace — Pine has no Arial; Default is its Arial-like sans-serif) |
+| **Label text colors** | Independent from the line colors — one color for **bullish (+)** labels and one for **bearish (-)** labels |
 | **Show mitigated line labels** | When off, a level's label text is removed once that level is mitigated (the frozen line stays). Active levels always keep their label. Default on |
 | **Dashboard (color legend)** | Off by default. A horizontal on-chart table (default top-right when enabled) with **one column per enabled level** — row 1 the short label (`+4H FVG T`, `+4H FVG CE`, `-D OB B`, …), row 2 the color swatch. A level appears only if it's actually shown on the chart (its timeframe is on **and** that Top/CE/Bottom toggle is on), so disabled levels are omitted. Configurable position, text size, background and text color; can be toggled off |
 | **Alerts** | Built-in `alertcondition` fires for new W / D / 4H / 15M FVGs **and** OBs |

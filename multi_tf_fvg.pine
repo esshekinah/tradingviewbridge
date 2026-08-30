@@ -158,6 +158,8 @@ grp4 = "General"
 maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100, group=grp4)
 extendBars    = input.int(30,  "Extend lines (bars)",      minval=0, maxval=500, group=grp4)
 showLabels    = input.bool(true, "Show text labels",   group=grp4)
+bullTxtCol    = input.color(color.white, "Bullish (+) label text", group=grp4, inline="txt")
+bearTxtCol    = input.color(color.white, "Bearish (-) label text", group=grp4, inline="txt")
 showMitLabels = input.bool(true, "Show mitigated line labels", group=grp4, tooltip="When off, a level's text label is removed once that level is mitigated (the line still stays, frozen at the mitigation bar). Active levels always keep their label.")
 lblSizeInp    = input.string("Small", "Label text size", options=["Tiny","Small","Normal","Large"], group=grp4)
 lblFontInp    = input.string("Default", "Label font", options=["Default","Monospace"], group=grp4, tooltip="Pine Script only supports these two font families — a true Arial cannot be selected. 'Default' is TradingView's standard sans-serif (Arial-like).")
@@ -259,7 +261,8 @@ dashSize() =>
 
 
 // Create one horizontal level line + right-end label. Returns [line, label].
-mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl, int tfMs) =>
+// `col` = line color, `txtCol` = label text color (configured independently).
+mkLevel(int t2mid, float lvl, color col, color txtCol, string txt, bool show, bool showLbl, int tfMs) =>
     line  ln = na
     label lb = na
     if show
@@ -269,10 +272,7 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl, in
         int x2 = t2mid + tfMs
         ln := line.new(x1 = t2mid, y1 = lvl, x2 = x2, y2 = lvl, xloc = xloc.bar_time, color = col, style = line.style_solid, width = lineWidth)
         if showLbl
-            // Label text uses a fully opaque version of the line color so it
-            // stays readable even when the line itself is very faint (e.g. the
-            // default 95% transparency).
-            lb := label.new(x = x2, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = color.new(col, 0), color = color.new(color.black, 100), style = label.style_label_left, size = lblSize(), text_font_family = lblFont())
+            lb := label.new(x = x2, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = txtCol, color = color.new(color.black, 100), style = label.style_label_left, size = lblSize(), text_font_family = lblFont())
     [ln, lb]
 
 
@@ -315,10 +315,11 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
                 bool shTop = bull ? bullTop : bearTop
                 bool shCE  = bull ? bullCE  : bearCE
                 bool shBot = bull ? bullBot : bearBot
+                color txtCol = bull ? bullTxtCol : bearTxtCol
 
-                [tLn, tLb] = mkLevel(t2mid, top, col, pfx + "Top",    visible and shTop, showLbl, tfMs)
-                [cLn, cLb] = mkLevel(t2mid, ceL, col, pfx + "CE",     visible and shCE,  showLbl, tfMs)
-                [bLn, bLb] = mkLevel(t2mid, bot, col, pfx + "Bottom", visible and shBot, showLbl, tfMs)
+                [tLn, tLb] = mkLevel(t2mid, top, col, txtCol, pfx + "Top",    visible and shTop, showLbl, tfMs)
+                [cLn, cLb] = mkLevel(t2mid, ceL, col, txtCol, pfx + "CE",     visible and shCE,  showLbl, tfMs)
+                [bLn, bLb] = mkLevel(t2mid, bot, col, txtCol, pfx + "Bottom", visible and shBot, showLbl, tfMs)
 
                 store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
 
@@ -363,10 +364,11 @@ detectOB(array<FVG> store, float po, float pc, float ph, float pl, int pt, float
                 bool shTop = bull ? bullTop : bearTop
                 bool shCE  = bull ? bullCE  : bearCE
                 bool shBot = bull ? bullBot : bearBot
+                color txtCol = bull ? bullTxtCol : bearTxtCol
 
-                [tLn, tLb] = mkLevel(pt, top, col, pfx + "Top",    visible and shTop, showLbl, tfMs)
-                [cLn, cLb] = mkLevel(pt, ceL, col, pfx + "CE",     visible and shCE,  showLbl, tfMs)
-                [bLn, bLb] = mkLevel(pt, bot, col, pfx + "Bottom", visible and shBot, showLbl, tfMs)
+                [tLn, tLb] = mkLevel(pt, top, col, txtCol, pfx + "Top",    visible and shTop, showLbl, tfMs)
+                [cLn, cLb] = mkLevel(pt, ceL, col, txtCol, pfx + "CE",     visible and shCE,  showLbl, tfMs)
+                [bLn, bLb] = mkLevel(pt, bot, col, txtCol, pfx + "Bottom", visible and shBot, showLbl, tfMs)
 
                 store.push(FVG.new(top, ceL, bot, bull, dStart, dEnd, tLn, cLn, bLn, tLb, cLb, bLb, false, false, false))
 
