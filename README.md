@@ -31,8 +31,9 @@ Both FVGs and OBs are drawn as **three horizontal lines** — **Top**, **CE** (m
 ```
 
 - `+` = **bullish** FVG, `-` = **bearish** FVG
-- Each timeframe/direction has its own configurable line color (default **5% opacity / 95% transparent** so lines are subtle)
-- Label **text color is configured separately** from the line color — one for bullish (+), one for bearish (-) — so labels stay readable regardless of how faint the lines are
+- Colors are grouped **per timeframe** (Weekly / Daily / 4H / 15M). Each timeframe has **4 color inputs**: bullish line, bearish line, bullish text, bearish text.
+- **FVGs and OBs share the same colors** within a timeframe/direction (line color and text color), keeping configuration simple.
+- Line colors default to **5% opacity / 95% transparent** (subtle); text colors are configured separately so labels stay readable regardless of how faint the lines are.
 
 Each line extends to the right until **its own level is mitigated**, then it is **discontinued** — frozen at the bar where price re-entered it. The Top, CE, and Bottom of a single FVG are mitigated independently.
 
@@ -53,14 +54,12 @@ Each line extends to the right until **its own level is mitigated**, then it is 
 | Setting | Description |
 |---|---|
 | **Show FVGs / OBs per W / D / 4H / 15M** | Toggle FVGs and OBs independently for each of the four timeframes, each with its own timeframe input |
-| **FVG line colors** | Eight color inputs — Bullish (+)/Bearish (-) for W, D, 4H, 15M |
-| **OB line colors** | Eight separate color inputs — Bullish (+)/Bearish (-) for W, D, 4H, 15M — so OBs are visually distinct from FVGs |
+| **Colors (per timeframe)** | 4 inputs per timeframe — bullish line, bearish line, bullish text, bearish text. FVGs and OBs share the same colors within a timeframe/direction |
 | **Line width / Mitigation by (Wick/Body)** | Shared by FVGs and OBs |
 | **Show/Hide Lines** | Per-category visibility — Top, CE, Bottom toggled independently for every timeframe × direction, separately for FVGs (**24 toggles**) and OBs (**24 toggles**) |
 | **Max FVGs per set** | Trims oldest FVGs/OBs per store to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
-| **Show text labels** | Toggle the right-end labels; configurable **text size** and **font** (Default / Monospace — Pine has no Arial; Default is its Arial-like sans-serif) |
-| **Label text colors** | Independent from the line colors — one color for **bullish (+)** labels and one for **bearish (-)** labels |
+| **Show text labels** | Toggle the right-end labels; configurable **text size** and **font** (Default / Monospace — Pine has no Arial; Default is its Arial-like sans-serif). Text colors are set per timeframe (see Colors above), independent of line colors |
 | **Show mitigated line labels** | When off, a level's label text is removed once that level is mitigated (the frozen line stays). Active levels always keep their label. Default on |
 | **Dashboard (color legend)** | Off by default. A horizontal on-chart table (default top-right when enabled) with **one column per enabled level** — row 1 the short label (`+4H FVG T`, `+4H FVG CE`, `-D OB B`, …), row 2 the color swatch. A level appears only if it's actually shown on the chart (its timeframe is on **and** that Top/CE/Bottom toggle is on), so disabled levels are omitted. Configurable position, text size, background and text color; can be toggled off |
 | **Alerts** | Built-in `alertcondition` fires for new W / D / 4H / 15M FVGs **and** OBs |
