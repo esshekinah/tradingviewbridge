@@ -158,6 +158,7 @@ grp4 = "General"
 maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100, group=grp4)
 extendBars    = input.int(30,  "Extend lines (bars)",      minval=0, maxval=500, group=grp4)
 showLabels    = input.bool(true, "Show text labels",   group=grp4)
+showMitLabels = input.bool(true, "Show mitigated line labels", group=grp4, tooltip="When off, a level's text label is removed once that level is mitigated (the line still stays, frozen at the mitigation bar). Active levels always keep their label.")
 lblSizeInp    = input.string("Small", "Label text size", options=["Tiny","Small","Normal","Large"], group=grp4)
 lblFontInp    = input.string("Default", "Label font", options=["Default","Monospace"], group=grp4, tooltip="Pine Script only supports these two font families — a true Arial cannot be selected. 'Default' is TradingView's standard sans-serif (Arial-like).")
 
@@ -422,7 +423,11 @@ maintainFVG(array<FVG> store) =>
                     if not na(f.topLn)
                         line.set_x2(f.topLn, frozenX)
                         if not na(f.topLbl)
-                            label.set_x(f.topLbl, frozenX)
+                            if showMitLabels
+                                label.set_x(f.topLbl, frozenX)
+                            else
+                                label.delete(f.topLbl)
+                                f.topLbl := na
                 else if not na(f.topLn)
                     line.set_x2(f.topLn, activeX)
                     // Label floats at the latest real bar so it stays visible.
@@ -437,7 +442,11 @@ maintainFVG(array<FVG> store) =>
                     if not na(f.botLn)
                         line.set_x2(f.botLn, frozenX)
                         if not na(f.botLbl)
-                            label.set_x(f.botLbl, frozenX)
+                            if showMitLabels
+                                label.set_x(f.botLbl, frozenX)
+                            else
+                                label.delete(f.botLbl)
+                                f.botLbl := na
                 else if not na(f.botLn)
                     line.set_x2(f.botLn, activeX)
                     if not na(f.botLbl)
@@ -451,7 +460,11 @@ maintainFVG(array<FVG> store) =>
                     if not na(f.ceLn)
                         line.set_x2(f.ceLn, frozenX)
                         if not na(f.ceLbl)
-                            label.set_x(f.ceLbl, frozenX)
+                            if showMitLabels
+                                label.set_x(f.ceLbl, frozenX)
+                            else
+                                label.delete(f.ceLbl)
+                                f.ceLbl := na
                 else if not na(f.ceLn)
                     line.set_x2(f.ceLn, activeX)
                     if not na(f.ceLbl)

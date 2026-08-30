@@ -59,6 +59,7 @@ Each line extends to the right until **its own level is mitigated**, then it is 
 | **Max FVGs per set** | Trims oldest FVGs/OBs per store to keep the chart clean |
 | **Extend lines (bars)** | How far right each active level projects |
 | **Show text labels** | Toggle the right-end labels; configurable **text size** and **font** (Default / Monospace — Pine has no Arial; Default is its Arial-like sans-serif) |
+| **Show mitigated line labels** | When off, a level's label text is removed once that level is mitigated (the frozen line stays). Active levels always keep their label. Default on |
 | **Dashboard (color legend)** | Off by default. A horizontal on-chart table (default top-right when enabled) with **one column per enabled level** — row 1 the short label (`+4H FVG T`, `+4H FVG CE`, `-D OB B`, …), row 2 the color swatch. A level appears only if it's actually shown on the chart (its timeframe is on **and** that Top/CE/Bottom toggle is on), so disabled levels are omitted. Configurable position, text size, background and text color; can be toggled off |
 | **Alerts** | Built-in `alertcondition` fires for new W / D / 4H / 15M FVGs **and** OBs |
 
