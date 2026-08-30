@@ -49,24 +49,24 @@ show15mOB     = input.bool(true,   "Show 15M OBs",       group=grp2)
 tf15m         = input.timeframe("15",  "15M Timeframe",  group=grp2)
 
 grp5 = "FVG Line Colors"
-bullWCol      = input.color(color.yellow, "Weekly Bullish (+) color", group=grp5, inline="cw")
-bearWCol      = input.color(color.fuchsia,"Weekly Bearish (-) color", group=grp5, inline="cw")
-bullDCol      = input.color(color.lime,   "Daily Bullish (+) color",  group=grp5, inline="cd")
-bearDCol      = input.color(color.maroon, "Daily Bearish (-) color",  group=grp5, inline="cd")
-bull4hCol     = input.color(color.white,  "4H Bullish (+) color",  group=grp5, inline="c4")
-bear4hCol     = input.color(color.red,    "4H Bearish (-) color",  group=grp5, inline="c4")
-bull15mCol    = input.color(color.aqua,   "15M Bullish (+) color", group=grp5, inline="c15")
-bear15mCol    = input.color(color.orange, "15M Bearish (-) color", group=grp5, inline="c15")
+bullWCol      = input.color(color.new(color.yellow, 95),  "Weekly Bullish (+) color", group=grp5, inline="cw")
+bearWCol      = input.color(color.new(color.fuchsia,95),  "Weekly Bearish (-) color", group=grp5, inline="cw")
+bullDCol      = input.color(color.new(color.lime,  95),   "Daily Bullish (+) color",  group=grp5, inline="cd")
+bearDCol      = input.color(color.new(color.maroon,95),   "Daily Bearish (-) color",  group=grp5, inline="cd")
+bull4hCol     = input.color(color.new(color.white, 95),   "4H Bullish (+) color",  group=grp5, inline="c4")
+bear4hCol     = input.color(color.new(color.red,   95),   "4H Bearish (-) color",  group=grp5, inline="c4")
+bull15mCol    = input.color(color.new(color.aqua,  95),   "15M Bullish (+) color", group=grp5, inline="c15")
+bear15mCol    = input.color(color.new(color.orange,95),   "15M Bearish (-) color", group=grp5, inline="c15")
 
 grp5b = "OB Line Colors"
-obBullWCol    = input.color(color.new(color.yellow, 30),  "Weekly Bullish (+) color", group=grp5b, inline="ocw")
-obBearWCol    = input.color(color.new(color.fuchsia,30),  "Weekly Bearish (-) color", group=grp5b, inline="ocw")
-obBullDCol    = input.color(color.new(color.lime,  30),   "Daily Bullish (+) color",  group=grp5b, inline="ocd")
-obBearDCol    = input.color(color.new(color.maroon,30),   "Daily Bearish (-) color",  group=grp5b, inline="ocd")
-obBull4hCol   = input.color(color.new(color.gray,  0),    "4H Bullish (+) color",  group=grp5b, inline="oc4")
-obBear4hCol   = input.color(color.new(color.orange,0),    "4H Bearish (-) color",  group=grp5b, inline="oc4")
-obBull15mCol  = input.color(color.new(color.blue,  0),    "15M Bullish (+) color", group=grp5b, inline="oc15")
-obBear15mCol  = input.color(color.new(color.purple,0),    "15M Bearish (-) color", group=grp5b, inline="oc15")
+obBullWCol    = input.color(color.new(color.yellow, 95),  "Weekly Bullish (+) color", group=grp5b, inline="ocw")
+obBearWCol    = input.color(color.new(color.fuchsia,95),  "Weekly Bearish (-) color", group=grp5b, inline="ocw")
+obBullDCol    = input.color(color.new(color.lime,  95),   "Daily Bullish (+) color",  group=grp5b, inline="ocd")
+obBearDCol    = input.color(color.new(color.maroon,95),   "Daily Bearish (-) color",  group=grp5b, inline="ocd")
+obBull4hCol   = input.color(color.new(color.gray,  95),   "4H Bullish (+) color",  group=grp5b, inline="oc4")
+obBear4hCol   = input.color(color.new(color.orange,95),   "4H Bearish (-) color",  group=grp5b, inline="oc4")
+obBull15mCol  = input.color(color.new(color.blue,  95),   "15M Bullish (+) color", group=grp5b, inline="oc15")
+obBear15mCol  = input.color(color.new(color.purple,95),   "15M Bearish (-) color", group=grp5b, inline="oc15")
 
 grpLW = "Line Style"
 lineWidth     = input.int(1, "Line width", minval=1, maxval=4, group=grpLW)
@@ -162,7 +162,7 @@ lblSizeInp    = input.string("Small", "Label text size", options=["Tiny","Small"
 lblFontInp    = input.string("Default", "Label font", options=["Default","Monospace"], group=grp4, tooltip="Pine Script only supports these two font families — a true Arial cannot be selected. 'Default' is TradingView's standard sans-serif (Arial-like).")
 
 grp7 = "Dashboard (color legend)"
-showDash      = input.bool(true, "Show dashboard", group=grp7)
+showDash      = input.bool(false, "Show dashboard", group=grp7)
 dashPosInp    = input.string("Top Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left","Middle Right"], group=grp7)
 dashSizeInp   = input.string("Small", "Dashboard text size", options=["Tiny","Small","Normal","Large"], group=grp7)
 dashBgCol     = input.color(color.new(color.black, 20), "Background", group=grp7, inline="dbg")
@@ -268,7 +268,10 @@ mkLevel(int t2mid, float lvl, color col, string txt, bool show, bool showLbl, in
         int x2 = t2mid + tfMs
         ln := line.new(x1 = t2mid, y1 = lvl, x2 = x2, y2 = lvl, xloc = xloc.bar_time, color = col, style = line.style_solid, width = lineWidth)
         if showLbl
-            lb := label.new(x = x2, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = col, color = color.new(color.black, 100), style = label.style_label_left, size = lblSize(), text_font_family = lblFont())
+            // Label text uses a fully opaque version of the line color so it
+            // stays readable even when the line itself is very faint (e.g. the
+            // default 95% transparency).
+            lb := label.new(x = x2, y = lvl, xloc = xloc.bar_time, text = txt, textcolor = color.new(col, 0), color = color.new(color.black, 100), style = label.style_label_left, size = lblSize(), text_font_family = lblFont())
     [ln, lb]
 
 
