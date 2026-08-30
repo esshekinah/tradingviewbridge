@@ -48,25 +48,31 @@ show15m       = input.bool(true,   "Show 15M FVGs",      group=grp2)
 show15mOB     = input.bool(true,   "Show 15M OBs",       group=grp2)
 tf15m         = input.timeframe("15",  "15M Timeframe",  group=grp2)
 
-grp5 = "FVG Line Colors"
-bullWCol      = input.color(color.new(color.yellow, 95),  "Weekly Bullish (+) color", group=grp5, inline="cw")
-bearWCol      = input.color(color.new(color.fuchsia,95),  "Weekly Bearish (-) color", group=grp5, inline="cw")
-bullDCol      = input.color(color.new(color.lime,  95),   "Daily Bullish (+) color",  group=grp5, inline="cd")
-bearDCol      = input.color(color.new(color.maroon,95),   "Daily Bearish (-) color",  group=grp5, inline="cd")
-bull4hCol     = input.color(color.new(color.white, 95),   "4H Bullish (+) color",  group=grp5, inline="c4")
-bear4hCol     = input.color(color.new(color.red,   95),   "4H Bearish (-) color",  group=grp5, inline="c4")
-bull15mCol    = input.color(color.new(color.aqua,  95),   "15M Bullish (+) color", group=grp5, inline="c15")
-bear15mCol    = input.color(color.new(color.orange,95),   "15M Bearish (-) color", group=grp5, inline="c15")
+// Colors are per-timeframe and shared by both FVG and OB: one line color and
+// one text color for each direction (bullish / bearish).
+grpCW = "Weekly Colors"
+bullWCol      = input.color(color.new(color.yellow, 95),  "Bullish (+) line",  group=grpCW, inline="l")
+bearWCol      = input.color(color.new(color.fuchsia,95),  "Bearish (-) line",  group=grpCW, inline="l")
+txtBullWCol   = input.color(color.white,                  "Bullish (+) text",  group=grpCW, inline="t")
+txtBearWCol   = input.color(color.white,                  "Bearish (-) text",  group=grpCW, inline="t")
 
-grp5b = "OB Line Colors"
-obBullWCol    = input.color(color.new(color.yellow, 95),  "Weekly Bullish (+) color", group=grp5b, inline="ocw")
-obBearWCol    = input.color(color.new(color.fuchsia,95),  "Weekly Bearish (-) color", group=grp5b, inline="ocw")
-obBullDCol    = input.color(color.new(color.lime,  95),   "Daily Bullish (+) color",  group=grp5b, inline="ocd")
-obBearDCol    = input.color(color.new(color.maroon,95),   "Daily Bearish (-) color",  group=grp5b, inline="ocd")
-obBull4hCol   = input.color(color.new(color.gray,  95),   "4H Bullish (+) color",  group=grp5b, inline="oc4")
-obBear4hCol   = input.color(color.new(color.orange,95),   "4H Bearish (-) color",  group=grp5b, inline="oc4")
-obBull15mCol  = input.color(color.new(color.blue,  95),   "15M Bullish (+) color", group=grp5b, inline="oc15")
-obBear15mCol  = input.color(color.new(color.purple,95),   "15M Bearish (-) color", group=grp5b, inline="oc15")
+grpCD = "Daily Colors"
+bullDCol      = input.color(color.new(color.lime,  95),   "Bullish (+) line",  group=grpCD, inline="l")
+bearDCol      = input.color(color.new(color.maroon,95),   "Bearish (-) line",  group=grpCD, inline="l")
+txtBullDCol   = input.color(color.white,                  "Bullish (+) text",  group=grpCD, inline="t")
+txtBearDCol   = input.color(color.white,                  "Bearish (-) text",  group=grpCD, inline="t")
+
+grpC4 = "4H Colors"
+bull4hCol     = input.color(color.new(color.white, 95),   "Bullish (+) line",  group=grpC4, inline="l")
+bear4hCol     = input.color(color.new(color.red,   95),   "Bearish (-) line",  group=grpC4, inline="l")
+txtBull4hCol  = input.color(color.white,                  "Bullish (+) text",  group=grpC4, inline="t")
+txtBear4hCol  = input.color(color.white,                  "Bearish (-) text",  group=grpC4, inline="t")
+
+grpC15 = "15M Colors"
+bull15mCol    = input.color(color.new(color.aqua,  95),   "Bullish (+) line",  group=grpC15, inline="l")
+bear15mCol    = input.color(color.new(color.orange,95),   "Bearish (-) line",  group=grpC15, inline="l")
+txtBull15mCol = input.color(color.white,                  "Bullish (+) text",  group=grpC15, inline="t")
+txtBear15mCol = input.color(color.white,                  "Bearish (-) text",  group=grpC15, inline="t")
 
 grpLW = "Line Style"
 lineWidth     = input.int(1, "Line width", minval=1, maxval=4, group=grpLW)
@@ -158,8 +164,6 @@ grp4 = "General"
 maxFvgs       = input.int(20,  "Max FVGs to keep per set", minval=1, maxval=100, group=grp4)
 extendBars    = input.int(30,  "Extend lines (bars)",      minval=0, maxval=500, group=grp4)
 showLabels    = input.bool(true, "Show text labels",   group=grp4)
-bullTxtCol    = input.color(color.white, "Bullish (+) label text", group=grp4, inline="txt")
-bearTxtCol    = input.color(color.white, "Bearish (-) label text", group=grp4, inline="txt")
 showMitLabels = input.bool(true, "Show mitigated line labels", group=grp4, tooltip="When off, a level's text label is removed once that level is mitigated (the line still stays, frozen at the mitigation bar). Active levels always keep their label.")
 lblSizeInp    = input.string("Small", "Label text size", options=["Tiny","Small","Normal","Large"], group=grp4)
 lblFontInp    = input.string("Default", "Label font", options=["Default","Monospace"], group=grp4, tooltip="Pine Script only supports these two font families — a true Arial cannot be selected. 'Default' is TradingView's standard sans-serif (Arial-like).")
@@ -280,7 +284,7 @@ mkLevel(int t2mid, float lvl, color col, color txtCol, string txt, bool show, bo
 // Detects a new FVG on the given HTF stream and appends it to `store`, drawing
 // the Top/CE/Bottom lines and labels. `tfMs` bounds the displacement window.
 // Returns [confirmed, bot, top, isBull, dispStart, dispEnd] for the new FVG.
-detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot, bool requireConf, array<FVG> htf) =>
+detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mid, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, color bullTxtC, color bearTxtC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot, bool requireConf, array<FVG> htf) =>
     bool  drawn   = false
     float newTop  = na
     float newBot  = na
@@ -315,7 +319,7 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
                 bool shTop = bull ? bullTop : bearTop
                 bool shCE  = bull ? bullCE  : bearCE
                 bool shBot = bull ? bullBot : bearBot
-                color txtCol = bull ? bullTxtCol : bearTxtCol
+                color txtCol = bull ? bullTxtC : bearTxtC
 
                 [tLn, tLb] = mkLevel(t2mid, top, col, txtCol, pfx + "Top",    visible and shTop, showLbl, tfMs)
                 [cLn, cLb] = mkLevel(t2mid, ceL, col, txtCol, pfx + "CE",     visible and shCE,  showLbl, tfMs)
@@ -341,7 +345,7 @@ detectFVG(array<FVG> store, float hh1, float ll1, float hh3, float ll3, int t2mi
 // candle's close. Reuses the FVG type/store + mkLevel + maintainFVG.
 //   Bullish OB : prev bearish (pc < po) AND cc > ph  → zone = prev body
 //   Bearish OB : prev bullish (pc > po) AND cc < pl  → zone = prev body
-detectOB(array<FVG> store, float po, float pc, float ph, float pl, int pt, float cc, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot, bool requireConf, array<FVG> htf) =>
+detectOB(array<FVG> store, float po, float pc, float ph, float pl, int pt, float cc, int tfMs, bool isNew, string tfLabel, bool visible, bool showLbl, color bullC, color bearC, color bullTxtC, color bearTxtC, bool bullTop, bool bullCE, bool bullBot, bool bearTop, bool bearCE, bool bearBot, bool requireConf, array<FVG> htf) =>
     if isNew and not na(po) and not na(pc) and not na(cc)
         bool bull = (pc < po) and (cc > ph)   // prev bearish, current closes above prev high
         bool bear = (pc > po) and (cc < pl)   // prev bullish, current closes below prev low
@@ -364,7 +368,7 @@ detectOB(array<FVG> store, float po, float pc, float ph, float pl, int pt, float
                 bool shTop = bull ? bullTop : bearTop
                 bool shCE  = bull ? bullCE  : bearCE
                 bool shBot = bull ? bullBot : bearBot
-                color txtCol = bull ? bullTxtCol : bearTxtCol
+                color txtCol = bull ? bullTxtC : bearTxtC
 
                 [tLn, tLb] = mkLevel(pt, top, col, txtCol, pfx + "Top",    visible and shTop, showLbl, tfMs)
                 [cLn, cLb] = mkLevel(pt, ceL, col, txtCol, pfx + "CE",     visible and shCE,  showLbl, tfMs)
@@ -512,28 +516,28 @@ var array<FVG> noConf = array.new<FVG>()
 
 // ── Higher-timeframe FVGs ──
 if showW
-    detectFVG(fvgW, H1_W, L1_W, H3_W, L3_W, T2_W, msW, isNewW, "W", showW, showLabels and showW, bullWCol, bearWCol, sWBullTop, sWBullCE, sWBullBot, sWBearTop, sWBearCE, sWBearBot, false, noConf)
+    detectFVG(fvgW, H1_W, L1_W, H3_W, L3_W, T2_W, msW, isNewW, "W", showW, showLabels and showW, bullWCol, bearWCol, txtBullWCol, txtBearWCol, sWBullTop, sWBullCE, sWBullBot, sWBearTop, sWBearCE, sWBearBot, false, noConf)
 maintainFVG(fvgW)
 
 if showD
-    detectFVG(fvgD, H1_D, L1_D, H3_D, L3_D, T2_D, msD, isNewD, "D", showD, showLabels and showD, bullDCol, bearDCol, sDBullTop, sDBullCE, sDBullBot, sDBearTop, sDBearCE, sDBearBot, false, noConf)
+    detectFVG(fvgD, H1_D, L1_D, H3_D, L3_D, T2_D, msD, isNewD, "D", showD, showLabels and showD, bullDCol, bearDCol, txtBullDCol, txtBearDCol, sDBullTop, sDBullCE, sDBullBot, sDBearTop, sDBearCE, sDBearBot, false, noConf)
 maintainFVG(fvgD)
 
 if show4h
-    detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol, s4hBullTop, s4hBullCE, s4hBullBot, s4hBearTop, s4hBearCE, s4hBearBot, false, noConf)
+    detectFVG(fvg4h, H1_4h, L1_4h, H3_4h, L3_4h, T2_4h, ms4h, isNew4h, "4H", show4h, showLabels and show4h, bull4hCol, bear4hCol, txtBull4hCol, txtBear4hCol, s4hBullTop, s4hBullCE, s4hBullBot, s4hBearTop, s4hBearCE, s4hBearBot, false, noConf)
 maintainFVG(fvg4h)
 
 // ── Higher-timeframe OBs ──
 if showWOB
-    detectOB(obW, oPO_W, oPC_W, oPH_W, oPL_W, oPT_W, oCC_W, msW, obNewW, "W", showWOB, showLabels and showWOB, obBullWCol, obBearWCol, oWBullTop, oWBullCE, oWBullBot, oWBearTop, oWBearCE, oWBearBot, false, noConf)
+    detectOB(obW, oPO_W, oPC_W, oPH_W, oPL_W, oPT_W, oCC_W, msW, obNewW, "W", showWOB, showLabels and showWOB, bullWCol, bearWCol, txtBullWCol, txtBearWCol, oWBullTop, oWBullCE, oWBullBot, oWBearTop, oWBearCE, oWBearBot, false, noConf)
 maintainFVG(obW)
 
 if showDOB
-    detectOB(obD, oPO_D, oPC_D, oPH_D, oPL_D, oPT_D, oCC_D, msD, obNewD, "D", showDOB, showLabels and showDOB, obBullDCol, obBearDCol, oDBullTop, oDBullCE, oDBullBot, oDBearTop, oDBearCE, oDBearBot, false, noConf)
+    detectOB(obD, oPO_D, oPC_D, oPH_D, oPL_D, oPT_D, oCC_D, msD, obNewD, "D", showDOB, showLabels and showDOB, bullDCol, bearDCol, txtBullDCol, txtBearDCol, oDBullTop, oDBullCE, oDBullBot, oDBearTop, oDBearCE, oDBearBot, false, noConf)
 maintainFVG(obD)
 
 if show4hOB
-    detectOB(ob4h, oPO_4h, oPC_4h, oPH_4h, oPL_4h, oPT_4h, oCC_4h, ms4h, obNew4h, "4H", show4hOB, showLabels and show4hOB, obBull4hCol, obBear4hCol, o4hBullTop, o4hBullCE, o4hBullBot, o4hBearTop, o4hBearCE, o4hBearBot, false, noConf)
+    detectOB(ob4h, oPO_4h, oPC_4h, oPH_4h, oPL_4h, oPT_4h, oCC_4h, ms4h, obNew4h, "4H", show4hOB, showLabels and show4hOB, bull4hCol, bear4hCol, txtBull4hCol, txtBear4hCol, o4hBullTop, o4hBullCE, o4hBullBot, o4hBearTop, o4hBearCE, o4hBearBot, false, noConf)
 maintainFVG(ob4h)
 
 // ── Combined active HTF pool (all W/D/4H FVGs + OBs) for the 15M filter ──
@@ -547,11 +551,11 @@ htfPool.concat(ob4h)
 
 // ── 15M FVG + OB, gated: only drawn if they overlap a same-direction HTF zone ──
 if show15m
-    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol, s15BullTop, s15BullCE, s15BullBot, s15BearTop, s15BearCE, s15BearBot, true, htfPool)
+    detectFVG(fvg15m, H1_15, L1_15, H3_15, L3_15, T2_15, ms15, isNew15, "15M", true, showLabels, bull15mCol, bear15mCol, txtBull15mCol, txtBear15mCol, s15BullTop, s15BullCE, s15BullBot, s15BearTop, s15BearCE, s15BearBot, true, htfPool)
 maintainFVG(fvg15m)
 
 if show15mOB
-    detectOB(ob15m, oPO_15, oPC_15, oPH_15, oPL_15, oPT_15, oCC_15, ms15, obNew15, "15M", true, showLabels, obBull15mCol, obBear15mCol, o15BullTop, o15BullCE, o15BullBot, o15BearTop, o15BearCE, o15BearBot, true, htfPool)
+    detectOB(ob15m, oPO_15, oPC_15, oPH_15, oPL_15, oPT_15, oCC_15, ms15, obNew15, "15M", true, showLabels, bull15mCol, bear15mCol, txtBull15mCol, txtBear15mCol, o15BullTop, o15BullCE, o15BullBot, o15BearTop, o15BearCE, o15BearBot, true, htfPool)
 maintainFVG(ob15m)
 
 
@@ -605,30 +609,30 @@ if showDash and barstate.islast
     addLvl(dLbl, dCol, show15m, s15BearBot, "-15M FVG B",  bear15mCol)
 
     // OB levels.
-    addLvl(dLbl, dCol, showWOB,  oWBullTop, "+W OB T",  obBullWCol)
-    addLvl(dLbl, dCol, showWOB,  oWBullCE,  "+W OB CE", obBullWCol)
-    addLvl(dLbl, dCol, showWOB,  oWBullBot, "+W OB B",  obBullWCol)
-    addLvl(dLbl, dCol, showWOB,  oWBearTop, "-W OB T",  obBearWCol)
-    addLvl(dLbl, dCol, showWOB,  oWBearCE,  "-W OB CE", obBearWCol)
-    addLvl(dLbl, dCol, showWOB,  oWBearBot, "-W OB B",  obBearWCol)
-    addLvl(dLbl, dCol, showDOB,  oDBullTop, "+D OB T",  obBullDCol)
-    addLvl(dLbl, dCol, showDOB,  oDBullCE,  "+D OB CE", obBullDCol)
-    addLvl(dLbl, dCol, showDOB,  oDBullBot, "+D OB B",  obBullDCol)
-    addLvl(dLbl, dCol, showDOB,  oDBearTop, "-D OB T",  obBearDCol)
-    addLvl(dLbl, dCol, showDOB,  oDBearCE,  "-D OB CE", obBearDCol)
-    addLvl(dLbl, dCol, showDOB,  oDBearBot, "-D OB B",  obBearDCol)
-    addLvl(dLbl, dCol, show4hOB, o4hBullTop, "+4H OB T",  obBull4hCol)
-    addLvl(dLbl, dCol, show4hOB, o4hBullCE,  "+4H OB CE", obBull4hCol)
-    addLvl(dLbl, dCol, show4hOB, o4hBullBot, "+4H OB B",  obBull4hCol)
-    addLvl(dLbl, dCol, show4hOB, o4hBearTop, "-4H OB T",  obBear4hCol)
-    addLvl(dLbl, dCol, show4hOB, o4hBearCE,  "-4H OB CE", obBear4hCol)
-    addLvl(dLbl, dCol, show4hOB, o4hBearBot, "-4H OB B",  obBear4hCol)
-    addLvl(dLbl, dCol, show15mOB, o15BullTop, "+15M OB T",  obBull15mCol)
-    addLvl(dLbl, dCol, show15mOB, o15BullCE,  "+15M OB CE", obBull15mCol)
-    addLvl(dLbl, dCol, show15mOB, o15BullBot, "+15M OB B",  obBull15mCol)
-    addLvl(dLbl, dCol, show15mOB, o15BearTop, "-15M OB T",  obBear15mCol)
-    addLvl(dLbl, dCol, show15mOB, o15BearCE,  "-15M OB CE", obBear15mCol)
-    addLvl(dLbl, dCol, show15mOB, o15BearBot, "-15M OB B",  obBear15mCol)
+    addLvl(dLbl, dCol, showWOB,  oWBullTop, "+W OB T",  bullWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBullCE,  "+W OB CE", bullWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBullBot, "+W OB B",  bullWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBearTop, "-W OB T",  bearWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBearCE,  "-W OB CE", bearWCol)
+    addLvl(dLbl, dCol, showWOB,  oWBearBot, "-W OB B",  bearWCol)
+    addLvl(dLbl, dCol, showDOB,  oDBullTop, "+D OB T",  bullDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBullCE,  "+D OB CE", bullDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBullBot, "+D OB B",  bullDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBearTop, "-D OB T",  bearDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBearCE,  "-D OB CE", bearDCol)
+    addLvl(dLbl, dCol, showDOB,  oDBearBot, "-D OB B",  bearDCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBullTop, "+4H OB T",  bull4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBullCE,  "+4H OB CE", bull4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBullBot, "+4H OB B",  bull4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBearTop, "-4H OB T",  bear4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBearCE,  "-4H OB CE", bear4hCol)
+    addLvl(dLbl, dCol, show4hOB, o4hBearBot, "-4H OB B",  bear4hCol)
+    addLvl(dLbl, dCol, show15mOB, o15BullTop, "+15M OB T",  bull15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BullCE,  "+15M OB CE", bull15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BullBot, "+15M OB B",  bull15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BearTop, "-15M OB T",  bear15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BearCE,  "-15M OB CE", bear15mCol)
+    addLvl(dLbl, dCol, show15mOB, o15BearBot, "-15M OB B",  bear15mCol)
 
     int n = dLbl.size()
     if n > 0
