@@ -92,6 +92,22 @@ Details:
 
 - Uses non-repainting `request.security` (`lookahead_off`), so gaps confirm only after the higher-timeframe candle closes — this avoids repainting and false signals.
 
+---
+
+# ICT CISD & FVG Entry Model | Emmanuel
+
+A second, standalone indicator ([`ict_cisd_fvg.pine`](./ict_cisd_fvg.pine)) that maps the classic ICT reversal sequence on the **current chart timeframe**:
+
+1. **Liquidity** — swing highs (buyside) and swing lows (sellside), from a configurable pivot length, drawn as labeled lines.
+2. **Sweep** — price wicks through a liquidity level then closes back on the other side (stop run).
+3. **CISD (Change in State of Delivery)** — after a sweep, the first candle that closes beyond a reference of the opposing move confirms delivery has flipped. The **CISD reference** is configurable: *Open of the move's first candle* or *High/Low of the last candle*.
+4. **FVG / IFVG** — a Fair Value Gap forms in the CISD direction; if price later closes through an FVG it **inverts** (IFVG) and flips role (support ↔ resistance), recolored and relabeled `I.F.V.G`.
+5. **Entry** — when the sequence lines up, a **LONG** (after a sellside sweep) or **SHORT** (after a buyside sweep) marker is plotted. The trigger can require the full *Sweep + CISD + FVG*, or the lighter *Sweep + CISD*.
+
+Configurable colors, labels, pivot length, zone extension, sweep→CISD lookback window, and alerts for sweeps, CISD, and entries.
+
+> This is an analysis/visualization tool, not a signal or advisory system.
+
 ## License
 
 MIT

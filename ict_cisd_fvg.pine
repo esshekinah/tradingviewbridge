@@ -1,0 +1,333 @@
+//@version=5
+indicator("ICT CISD & FVG Entry Model | Emmanuel", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ============================================================================
+// ICT CISD & FVG / IFVG Entry Model  (single timeframe)
+// ----------------------------------------------------------------------------
+// Maps the classic ICT reversal sequence on the current chart timeframe:
+//
+//   1. LIQUIDITY   — swing highs (buyside) / swing lows (sellside) are marked.
+//   2. SWEEP       — price wicks through a liquidity level then closes back on
+//                    the other side (stop run / liquidity grab).
+//   3. CISD        — Change in State of Delivery: after the sweep, the first
+//                    candle that closes beyond a reference of the preceding
+//                    opposing move confirms delivery has flipped direction.
+//   4. FVG / IFVG  — a Fair Value Gap forms in the CISD direction; an FVG that
+//                    price later closes through inverts (IFVG) and flips role.
+//   5. ENTRY       — when sweep -> CISD -> FVG/IFVG line up, an entry marker is
+//                    plotted (long after a sellside sweep, short after buyside).
+//
+// This is an analysis / visualization tool. It does not give financial advice
+// or guaranteed signals.
+// ============================================================================
+
+
+// ─────────────────────────────── Inputs ────────────────────────────────────
+grpLiq = "Liquidity"
+showLiq     = input.bool(true,  "Show liquidity levels",        group=grpLiq)
+pivotLen    = input.int(10, "Swing pivot length", minval=1, maxval=100, group=grpLiq, tooltip="Bars on each side of a pivot high/low used to detect swing liquidity.")
+maxLiq      = input.int(10, "Max liquidity levels kept", minval=1, maxval=50, group=grpLiq)
+buyLiqCol   = input.color(color.new(color.red,  0), "Buyside color",  group=grpLiq, inline="lc")
+sellLiqCol  = input.color(color.new(color.red,  0), "Sellside color", group=grpLiq, inline="lc")
+liqStyleInp = input.string("Dashed", "Line style", options=["Solid","Dashed","Dotted"], group=grpLiq)
+removeSwept = input.bool(true, "Remove liquidity once swept", group=grpLiq)
+
+grpCISD = "CISD"
+showCISD    = input.bool(true, "Show CISD", group=grpCISD)
+cisdRefInp  = input.string("Open of move's first candle", "CISD reference", options=["Open of move's first candle","High/Low of last candle"], group=grpCISD, tooltip="What price the confirming candle must close beyond to flag a Change in State of Delivery. 'Open of move's first candle' = the origin of the opposing run; 'High/Low of last candle' = the last opposing candle before the shift.")
+cisdBullCol = input.color(color.new(color.teal, 60), "Bullish CISD", group=grpCISD, inline="cc")
+cisdBearCol = input.color(color.new(color.red,  60), "Bearish CISD", group=grpCISD, inline="cc")
+
+grpFVG = "FVG / IFVG"
+showFVG     = input.bool(true, "Show FVG",  group=grpFVG)
+showIFVG    = input.bool(true, "Show IFVG (inversion)", group=grpFVG)
+fvgBullCol  = input.color(color.new(color.blue,   80), "Bullish FVG",  group=grpFVG, inline="fc")
+fvgBearCol  = input.color(color.new(color.orange, 80), "Bearish FVG",  group=grpFVG, inline="fc")
+ifvgBullCol = input.color(color.new(color.blue,   65), "Bullish IFVG", group=grpFVG, inline="ic")
+ifvgBearCol = input.color(color.new(color.orange, 65), "Bearish IFVG", group=grpFVG, inline="ic")
+maxFvgs     = input.int(10, "Max FVGs kept", minval=1, maxval=50, group=grpFVG)
+
+grpEntry = "Entry Model"
+showEntry   = input.bool(true, "Show entry markers", group=grpEntry)
+entryReq    = input.string("Sweep + CISD + FVG", "Trigger requires", options=["Sweep + CISD + FVG","Sweep + CISD"], group=grpEntry, tooltip="Full model needs a fresh FVG in the CISD direction; the lighter option fires on the CISD confirmation right after a sweep.")
+longCol     = input.color(color.lime, "Long",  group=grpEntry, inline="ec")
+shortCol    = input.color(color.red,  "Short", group=grpEntry, inline="ec")
+lookbackBars = input.int(20, "Sweep→CISD max bars", minval=1, maxval=200, group=grpEntry, tooltip="How many bars after a sweep the CISD/entry can still occur.")
+
+grpGen = "General"
+extendBars  = input.int(30, "Extend zones (bars)", minval=0, maxval=500, group=grpGen)
+showLabels  = input.bool(true, "Show labels", group=grpGen)
+lblSizeInp  = input.string("Small", "Label size", options=["Tiny","Small","Normal","Large"], group=grpGen)
+
+
+// ───────────────────────────── Helpers ─────────────────────────────────────
+lblSize() =>
+    lblSizeInp == "Tiny" ? size.tiny : lblSizeInp == "Normal" ? size.normal : lblSizeInp == "Large" ? size.large : size.small
+
+liqStyle() =>
+    liqStyleInp == "Solid" ? line.style_solid : liqStyleInp == "Dotted" ? line.style_dotted : line.style_dashed
+
+rightTime() =>
+    time + extendBars * (timeframe.in_seconds() * 1000)
+
+
+// ───────────────────────────── Types ───────────────────────────────────────
+// A liquidity level (swing high/low) awaiting a sweep.
+type Liq
+    float price
+    bool  isBuy      // true = buyside (swing high), false = sellside (swing low)
+    int   t          // bar time of the pivot (ms)
+    line  ln
+    label lb
+    bool  swept
+
+// A Fair Value Gap that can later invert into an IFVG.
+type FVG
+    float top
+    float bot
+    bool  isBull
+    box   bx
+    line  ceLn
+    label lb
+    bool  inverted   // has price closed through it (now an IFVG)?
+    bool  dead        // fully invalidated / removed
+
+
+// ───────────────────────────── Storage ─────────────────────────────────────
+var array<Liq> liqs  = array.new<Liq>()
+var array<FVG> fvgs  = array.new<FVG>()
+
+// Sweep / CISD state machine.
+var bool  pendBull   = false   // a sellside sweep is pending bullish CISD
+var bool  pendBear   = false   // a buyside sweep is pending bearish CISD
+var int   pendBar    = na      // bar_index when the sweep happened
+var float refBull    = na      // price the confirming candle must close ABOVE (bullish CISD)
+var float refBear    = na      // price the confirming candle must close BELOW (bearish CISD)
+
+
+// ─────────────────────── Liquidity (pivots) ────────────────────────────────
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low,  pivotLen, pivotLen)
+
+// A confirmed pivot sits `pivotLen` bars back.
+if showLiq and not na(ph)
+    Liq q = Liq.new(ph, true, time[pivotLen], na, na, false)
+    if showLabels
+        q.lb := label.new(bar_index, ph, "Buyside Liquidity", xloc.bar_index, yloc.price, color.new(color.black,100), label.style_label_down, buyLiqCol, lblSize())
+    q.ln := line.new(bar_index - pivotLen, ph, bar_index, ph, xloc.bar_index, extend.right, buyLiqCol, liqStyle())
+    liqs.push(q)
+    if liqs.size() > maxLiq * 2
+        Liq old = liqs.shift()
+        line.delete(old.ln)
+        label.delete(old.lb)
+
+if showLiq and not na(pl)
+    Liq q = Liq.new(pl, false, time[pivotLen], na, na, false)
+    if showLabels
+        q.lb := label.new(bar_index, pl, "Sellside Liquidity", xloc.bar_index, yloc.price, color.new(color.black,100), label.style_label_up, sellLiqCol, lblSize())
+    q.ln := line.new(bar_index - pivotLen, pl, bar_index, pl, xloc.bar_index, extend.right, sellLiqCol, liqStyle())
+    liqs.push(q)
+    if liqs.size() > maxLiq * 2
+        Liq old = liqs.shift()
+        line.delete(old.ln)
+        label.delete(old.lb)
+
+
+// ─────────────────────── Sweep detection ───────────────────────────────────
+// Sellside sweep: wick below a sellside level, close back above it → pending
+// bullish CISD. Buyside sweep: wick above a buyside level, close back below.
+bool sweptSell = false
+bool sweptBuy  = false
+if liqs.size() > 0
+    for i = liqs.size() - 1 to 0
+        Liq q = liqs.get(i)
+        if not q.swept
+            if not q.isBuy and low < q.price and close > q.price
+                q.swept   := true
+                sweptSell := true
+            else if q.isBuy and high > q.price and close < q.price
+                q.swept  := true
+                sweptBuy := true
+            if q.swept and removeSwept
+                line.delete(q.ln)
+                label.delete(q.lb)
+                liqs.remove(i)
+
+// Arm the CISD state machine on a sweep. The reference is captured from the
+// opposing move: for a bullish setup after a sellside sweep, we watch for a
+// close above either the open of the down-move's first candle or the high of
+// the last down candle (per the CISD reference input).
+if sweptSell
+    pendBull := true
+    pendBear := false
+    pendBar  := bar_index
+    refBull  := cisdRefInp == "High/Low of last candle" ? high[1] : open
+if sweptBuy
+    pendBear := true
+    pendBull := false
+    pendBar  := bar_index
+    refBear  := cisdRefInp == "High/Low of last candle" ? low[1] : open
+
+
+// ─────────────────────── CISD confirmation ─────────────────────────────────
+bool cisdBull = false
+bool cisdBear = false
+
+if pendBull and not na(refBull) and (bar_index - pendBar) <= lookbackBars
+    if close > refBull and close > open   // bullish displacement closes beyond reference
+        cisdBull := true
+        pendBull := false
+if pendBear and not na(refBear) and (bar_index - pendBar) <= lookbackBars
+    if close < refBear and close < open
+        cisdBear := true
+        pendBear := false
+
+// Expire stale pending sweeps.
+if pendBull and (bar_index - pendBar) > lookbackBars
+    pendBull := false
+if pendBear and (bar_index - pendBar) > lookbackBars
+    pendBear := false
+
+// Draw the CISD level when confirmed.
+if showCISD and cisdBull
+    line.new(bar_index - 1, refBull, bar_index + extendBars, refBull, xloc.bar_index, extend.none, color.new(cisdBullCol, 0), line.style_solid, 2)
+    if showLabels
+        label.new(bar_index, refBull, "CISD", xloc.bar_index, yloc.price, color.new(color.black,100), label.style_label_down, color.new(cisdBullCol,0), lblSize())
+if showCISD and cisdBear
+    line.new(bar_index - 1, refBear, bar_index + extendBars, refBear, xloc.bar_index, extend.none, color.new(cisdBearCol, 0), line.style_solid, 2)
+    if showLabels
+        label.new(bar_index, refBear, "CISD", xloc.bar_index, yloc.price, color.new(color.black,100), label.style_label_up, color.new(cisdBearCol,0), lblSize())
+
+
+// ─────────────────────── FVG detection + drawing ───────────────────────────
+// Standard 3-candle FVG on the chart timeframe.
+bool newBullFvg = low > high[2]
+bool newBearFvg = high < low[2]
+
+if showFVG and newBullFvg
+    float t = low
+    float b = high[2]
+    box bx = box.new(bar_index - 2, t, bar_index + extendBars, b, xloc = xloc.bar_index, border_color = color.new(fvgBullCol, 0), bgcolor = fvgBullCol)
+    line ce = line.new(bar_index - 2, (t + b) / 2, bar_index + extendBars, (t + b) / 2, xloc.bar_index, extend.none, color.new(fvgBullCol, 0), line.style_dotted)
+    label lb = na
+    if showLabels
+        lb := label.new(bar_index + extendBars, t, "F.V.G", xloc.bar_index, yloc.price, color.new(color.black,100), label.style_label_left, color.new(fvgBullCol,0), lblSize())
+    fvgs.push(FVG.new(t, b, true, bx, ce, lb, false, false))
+
+if showFVG and newBearFvg
+    float t = low[2]
+    float b = high
+    box bx = box.new(bar_index - 2, t, bar_index + extendBars, b, xloc = xloc.bar_index, border_color = color.new(fvgBearCol, 0), bgcolor = fvgBearCol)
+    line ce = line.new(bar_index - 2, (t + b) / 2, bar_index + extendBars, (t + b) / 2, xloc.bar_index, extend.none, color.new(fvgBearCol, 0), line.style_dotted)
+    label lb = na
+    if showLabels
+        lb := label.new(bar_index + extendBars, t, "F.V.G", xloc.bar_index, yloc.price, color.new(color.black,100), label.style_label_left, color.new(fvgBearCol,0), lblSize())
+    fvgs.push(FVG.new(t, b, false, bx, ce, lb, false, false))
+
+// Trim old FVGs.
+if fvgs.size() > maxFvgs
+    FVG old = fvgs.shift()
+    box.delete(old.bx)
+    line.delete(old.ceLn)
+    label.delete(old.lb)
+
+
+// ─────────────────────── IFVG (inversion) handling ─────────────────────────
+// If price CLOSES through an FVG, it inverts: a bullish FVG closed below becomes
+// a bearish IFVG (resistance); a bearish FVG closed above becomes a bullish
+// IFVG (support). Recolor + relabel; extend right edge each bar.
+bool ifvgBull = false
+bool ifvgBear = false
+if fvgs.size() > 0
+    for i = fvgs.size() - 1 to 0
+        FVG f = fvgs.get(i)
+        if not f.dead
+            // Keep zones extending to the right while alive.
+            box.set_right(f.bx, bar_index + extendBars)
+            line.set_x2(f.ceLn, bar_index + extendBars)
+            if not na(f.lb)
+                label.set_x(f.lb, bar_index + extendBars)
+
+            if not f.inverted
+                // Inversion when a candle body closes fully through the gap.
+                if f.isBull and close < f.bot
+                    f.inverted := true
+                    f.isBull   := false
+                    ifvgBear   := true
+                    if showIFVG
+                        box.set_bgcolor(f.bx, ifvgBearCol)
+                        box.set_border_color(f.bx, color.new(ifvgBearCol, 0))
+                        line.set_color(f.ceLn, color.new(ifvgBearCol, 0))
+                        if not na(f.lb)
+                            label.set_text(f.lb, "I.F.V.G")
+                            label.set_textcolor(f.lb, color.new(ifvgBearCol, 0))
+                    else
+                        box.delete(f.bx)
+                        line.delete(f.ceLn)
+                        if not na(f.lb)
+                            label.delete(f.lb)
+                        f.dead := true
+                else if (not f.isBull) and close > f.top
+                    f.inverted := true
+                    f.isBull   := true
+                    ifvgBull   := true
+                    if showIFVG
+                        box.set_bgcolor(f.bx, ifvgBullCol)
+                        box.set_border_color(f.bx, color.new(ifvgBullCol, 0))
+                        line.set_color(f.ceLn, color.new(ifvgBullCol, 0))
+                        if not na(f.lb)
+                            label.set_text(f.lb, "I.F.V.G")
+                            label.set_textcolor(f.lb, color.new(ifvgBullCol, 0))
+                    else
+                        box.delete(f.bx)
+                        line.delete(f.ceLn)
+                        if not na(f.lb)
+                            label.delete(f.lb)
+                        f.dead := true
+
+
+// ─────────────────────── Entry model trigger ───────────────────────────────
+// Track whether a CISD is active and still fresh, then require an FVG (or not).
+var bool  armLong  = false
+var bool  armShort = false
+var int   armBar   = na
+
+if cisdBull
+    armLong  := true
+    armShort := false
+    armBar   := bar_index
+if cisdBear
+    armShort := true
+    armLong  := false
+    armBar   := bar_index
+if (armLong or armShort) and (bar_index - armBar) > lookbackBars
+    armLong  := false
+    armShort := false
+
+bool longEntry  = false
+bool shortEntry = false
+if showEntry
+    if entryReq == "Sweep + CISD"
+        longEntry  := cisdBull
+        shortEntry := cisdBear
+    else
+        // Full model: entry when a fresh FVG (or IFVG) forms in the CISD
+        // direction while a CISD is still armed.
+        if armLong and (newBullFvg or ifvgBull)
+            longEntry := true
+            armLong   := false
+        if armShort and (newBearFvg or ifvgBear)
+            shortEntry := true
+            armShort   := false
+
+plotshape(longEntry,  title="Long Entry",  style=shape.triangleup,   location=location.belowbar, color=longCol,  size=size.small, text="LONG",  textcolor=longCol)
+plotshape(shortEntry, title="Short Entry", style=shape.triangledown, location=location.abovebar, color=shortCol, size=size.small, text="SHORT", textcolor=shortCol)
+
+
+// ───────────────────────────── Alerts ──────────────────────────────────────
+alertcondition(sweptSell, "Sellside Sweep", "Sellside liquidity swept")
+alertcondition(sweptBuy,  "Buyside Sweep",  "Buyside liquidity swept")
+alertcondition(cisdBull,  "Bullish CISD",   "Bullish Change in State of Delivery")
+alertcondition(cisdBear,  "Bearish CISD",   "Bearish Change in State of Delivery")
+alertcondition(longEntry, "Long Entry",     "ICT CISD/FVG long entry")
+alertcondition(shortEntry,"Short Entry",    "ICT CISD/FVG short entry")
