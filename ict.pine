@@ -216,7 +216,8 @@ type fairValueGap
     box topBox
     box bottomBox
     bool frozen = false
-    int bar = na       // formation bar_index (used for the BPR overlap window)
+    int bar = na       // formation bar_index
+    int htfIdx = na    // formation index counted in FVG-TIMEFRAME candles (BPR window)
     label lb = na      // "+<tf> FVG" / "-<tf> FVG" label, right-edge / centered
 
 // @type                            UDT representing a Balanced Price Range (BPR)
@@ -741,7 +742,7 @@ maintainBPRs(array<bpr> bprArr, bool deleteMitigated) =>
 // @param bprBear       bearish BPR color
 // @param lastClose..last2Low  values pulled from request.security in the wrapper
 // @returns             void
-drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, color bullColor, color bearColor, int bprWindow, color bprBull, color bprBear, bool autoThreshold, string tfLabel, float lastClose, float lastOpen, int lastTime, float currentHigh, float currentLow, int currentTime, float last2High, float last2Low, bool newTimeframe) =>
+drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, color bullColor, color bearColor, int bprWindow, color bprBull, color bprBear, bool autoThreshold, string tfLabel, int htfIdx, float lastClose, float lastOpen, int lastTime, float currentHigh, float currentLow, int currentTime, float last2High, float last2Low, bool newTimeframe) =>
     // In 'BPR only' mode the raw FVG boxes must exist (for overlap / mitigation
     // logic) but stay invisible, so render them fully transparent.
     color bullBoxColor  = mode == BPR_ONLY ? color.new(bullColor, 100) : bullColor
@@ -760,11 +761,11 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
     if bullishFairValueGap
         currentAlerts.bullishFairValueGap := true
         label bl = showFvgLbl ? label.new(bar_index, math.avg(currentLow, last2High), '+' + tfLabel + ' FVG', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(bullColor, 0), size.small) : na
-        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index, lb = bl))
+        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index, htfIdx = htfIdx, lb = bl))
     if bearishFairValueGap
         currentAlerts.bearishFairValueGap := true
         label br = showFvgLbl ? label.new(bar_index, math.avg(currentHigh, last2Low), '-' + tfLabel + ' FVG', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(bearColor, 0), size.small) : na
-        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index, lb = br))
+        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index, htfIdx = htfIdx, lb = br))
 
     // ── BPR: a bullish FVG + bearish FVG overlapping within the window ──
     // When a new FVG is added, scan the opposite-bias FVGs; if one overlaps in
@@ -779,7 +780,7 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
         int matchIdx = -1
         for i = 1 to gaps.size() - 1
             fairValueGap of = gaps.get(i)
-            bool inWindow = (bar_index - of.bar) <= bprWindow
+            bool inWindow = (htfIdx - of.htfIdx) <= bprWindow   // window in FVG-timeframe candles
             float ofLow  = math.min(of.top, of.bottom)
             float ofHigh = math.max(of.top, of.bottom)
             bool overlap = nfLow <= ofHigh and ofLow <= nfHigh
@@ -813,14 +814,21 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
 drawFairValueGaps1() =>
     [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframeInput, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]],lookahead = barmerge.lookahead_on)
     newTimeframe = timeframe.change(fairValueGapsTimeframeInput)
-    drawFairValueGapsCore(fairValueGaps, bprs, fairValueGapsModeInput, fairValueGapBullishColor, fairValueGapBearishColor, bprWindowInput, bprBullColorInput, bprBearColorInput, fairValueGapsThresholdInput, fvgTfLabel(fairValueGapsTimeframeInput), lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
+    // Count FVG-timeframe candles so the BPR window is measured in that TF.
+    var int htfCount1 = 0
+    if newTimeframe
+        htfCount1 += 1
+    drawFairValueGapsCore(fairValueGaps, bprs, fairValueGapsModeInput, fairValueGapBullishColor, fairValueGapBearishColor, bprWindowInput, bprBullColorInput, bprBearColorInput, fairValueGapsThresholdInput, fvgTfLabel(fairValueGapsTimeframeInput), htfCount1, lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
 
 // @function            draw fair value gaps - TF2 wrapper
 // @returns             void
 drawFairValueGaps2() =>
     [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframe2Input, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]],lookahead = barmerge.lookahead_on)
     newTimeframe = timeframe.change(fairValueGapsTimeframe2Input)
-    drawFairValueGapsCore(fairValueGaps2, bprs2, fairValueGapsMode2Input, fairValueGapBullishColor2, fairValueGapBearishColor2, bprWindow2Input, bprBull2ColorInput, bprBear2ColorInput, fairValueGapsThreshold2Input, fvgTfLabel(fairValueGapsTimeframe2Input), lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
+    var int htfCount2 = 0
+    if newTimeframe
+        htfCount2 += 1
+    drawFairValueGapsCore(fairValueGaps2, bprs2, fairValueGapsMode2Input, fairValueGapBullishColor2, fairValueGapBearishColor2, bprWindow2Input, bprBull2ColorInput, bprBear2ColorInput, fairValueGapsThreshold2Input, fvgTfLabel(fairValueGapsTimeframe2Input), htfCount2, lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
 
 // @function            get line style from string
 // @param style         line style
