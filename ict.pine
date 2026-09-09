@@ -119,6 +119,7 @@ fairValueGapsThresholdInput     = input(        true,       'Auto Threshold',   
 fairValueGapsTimeframeInput     = input.timeframe('',       'Timeframe',                group = GAPS_GROUP,     tooltip = fairValueGapsTimeframeTooltip)
 fairValueGapsBullColorInput     = input.color(color.new(#00ff68, 70), 'Bullish FVG' , group = GAPS_GROUP)
 fairValueGapsBearColorInput     = input.color(color.new(#ff0008, 70), 'Bearish FVG' , group = GAPS_GROUP)
+fairValueGapsDeleteInput        = input(        false,      'Delete mitigated',         group = GAPS_GROUP,     tooltip = 'When on, a FVG/BPR is removed once mitigated instead of being kept frozen on the chart.')
 bprWindowInput                  = input.int(    5,          'BPR max window (candles)', group = GAPS_GROUP,   minval = 1, maxval = 100)
 bprBullColorInput               = input.color(color.new(#26a69a, 40), 'Bullish BPR', group = GAPS_GROUP,   inline = 'bpr')
 bprBearColorInput               = input.color(color.new(#ef5350, 40), 'Bearish BPR', group = GAPS_GROUP,   inline = 'bpr')
@@ -129,6 +130,7 @@ fairValueGapsThreshold2Input    = input(        true,       'Auto Threshold',   
 fairValueGapsTimeframe2Input    = input.timeframe('240',    'Timeframe',                group = GAPS_GROUP2,    tooltip = fairValueGapsTimeframeTooltip)
 fairValueGapsBull2ColorInput    = input.color(color.new(#00b7ff, 70), 'Bullish FVG' , group = GAPS_GROUP2)
 fairValueGapsBear2ColorInput    = input.color(color.new(#ff8c00, 70), 'Bearish FVG' , group = GAPS_GROUP2)
+fairValueGapsDelete2Input       = input(        false,      'Delete mitigated',         group = GAPS_GROUP2,    tooltip = 'When on, a FVG/BPR is removed once mitigated instead of being kept frozen on the chart.')
 bprWindow2Input                 = input.int(    5,          'BPR max window (candles)', group = GAPS_GROUP2,  minval = 1, maxval = 100)
 bprBull2ColorInput              = input.color(color.new(#2962ff, 40), 'Bullish BPR', group = GAPS_GROUP2,  inline = 'bpr2')
 bprBear2ColorInput              = input.color(color.new(#9c27b0, 40), 'Bearish BPR', group = GAPS_GROUP2,  inline = 'bpr2')
@@ -215,6 +217,7 @@ type fairValueGap
     box bottomBox
     bool frozen = false
     int bar = na       // formation bar_index (used for the BPR overlap window)
+    label lb = na      // "+<tf> FVG" / "-<tf> FVG" label, right-edge / centered
 
 // @type                            UDT representing a Balanced Price Range (BPR)
 // @field top/bottom                price-ordered outer bounds of the overlap
@@ -662,14 +665,22 @@ displayStructure(bool internal = false) =>
 // @returns             box ID
 fairValueGapBox(leftTime,rightTime,topPrice,bottomPrice,boxColor) => box.new(chart.point.new(leftTime,na,topPrice),chart.point.new(rightTime,na,bottomPrice), xloc=xloc.bar_time, border_color = boxColor, bgcolor = boxColor)
 
+// @function            friendly timeframe string for FVG labels
+// Blank timeframe means the chart timeframe, so fall back to timeframe.period.
+// @param tf            the FVG's configured timeframe input string
+// @returns             string
+fvgTfLabel(simple string tf) => tf == '' ? timeframe.period : tf
+
 // @function            maintain fair value gaps
 // Extends every un-mitigated FVG dynamically to the CURRENT bar each candle.
 // When price fully fills the gap to its FAR edge (wick-based) — low <= bottom
 // for a bullish FVG, high >= top for a bearish FVG — the FVG is FROZEN: its
 // right edge is set to this (mitigation) bar and it stops extending. Frozen
 // FVGs are kept on the chart (not deleted).
+// If `deleteMitigated` is true, a mitigated FVG is REMOVED instead of frozen.
+// The "+<tf> FVG" label is kept at the box's right edge, vertically centered.
 // @returns             fairValueGap ID
-maintainFairValueGaps(array<fairValueGap> gaps) =>
+maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated) =>
     for [index,eachFairValueGap] in gaps
         if not eachFairValueGap.frozen
             // The type's `top`/`bottom` fields are NOT price-ordered: for a
@@ -680,26 +691,43 @@ maintainFairValueGaps(array<fairValueGap> gaps) =>
             float gapLow  = math.min(eachFairValueGap.top, eachFairValueGap.bottom)
             float gapHigh = math.max(eachFairValueGap.top, eachFairValueGap.bottom)
             bool mitigated = (eachFairValueGap.bias == BULLISH and low <= gapLow) or (eachFairValueGap.bias == BEARISH and high >= gapHigh)
-            // Right edge = current bar on mitigation (freeze there), else keep
-            // growing to the current bar.
-            eachFairValueGap.topBox.set_right(time)
-            eachFairValueGap.bottomBox.set_right(time)
-            if mitigated
-                eachFairValueGap.frozen := true
+            if mitigated and deleteMitigated
+                // Remove the FVG entirely.
+                eachFairValueGap.topBox.delete()
+                eachFairValueGap.bottomBox.delete()
+                if not na(eachFairValueGap.lb)
+                    eachFairValueGap.lb.delete()
+                gaps.remove(index)
+            else
+                // Right edge grows to the current bar; freeze on mitigation.
+                eachFairValueGap.topBox.set_right(time)
+                eachFairValueGap.bottomBox.set_right(time)
+                // Keep the label at the right edge, vertically centered.
+                if not na(eachFairValueGap.lb)
+                    eachFairValueGap.lb.set_x(bar_index)
+                    eachFairValueGap.lb.set_y(math.avg(gapLow, gapHigh))
+                if mitigated
+                    eachFairValueGap.frozen := true
     true
 
 // @function            maintain BPR zones
 // Extends each un-frozen BPR to the current bar; freezes it at the first wick
 // touch of EITHER edge (even a small touch), unlike FVGs which need a full fill.
 // @returns             bpr ID
-maintainBPRs(array<bpr> bprArr) =>
+maintainBPRs(array<bpr> bprArr, bool deleteMitigated) =>
     for [index, eachBpr] in bprArr
         if not eachBpr.frozen
-            eachBpr.bx.set_right(time)
-            // Keep the "BPR" label horizontally centered in the growing box.
-            eachBpr.lb.set_x(math.round(math.avg(eachBpr.leftBar, bar_index)))
-            if high >= eachBpr.bottom and low <= eachBpr.top   // any wick touch of the zone
-                eachBpr.frozen := true
+            bool touched = high >= eachBpr.bottom and low <= eachBpr.top   // any wick touch
+            if touched and deleteMitigated
+                eachBpr.bx.delete()
+                eachBpr.lb.delete()
+                bprArr.remove(index)
+            else
+                eachBpr.bx.set_right(time)
+                // Keep the "BPR" label horizontally centered in the growing box.
+                eachBpr.lb.set_x(math.round(math.avg(eachBpr.leftBar, bar_index)))
+                if touched
+                    eachBpr.frozen := true
     true
 
 // @function            core FVG + BPR engine, shared by both timeframes
@@ -713,13 +741,15 @@ maintainBPRs(array<bpr> bprArr) =>
 // @param bprBear       bearish BPR color
 // @param lastClose..last2Low  values pulled from request.security in the wrapper
 // @returns             void
-drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, color bullColor, color bearColor, int bprWindow, color bprBull, color bprBear, bool autoThreshold, float lastClose, float lastOpen, int lastTime, float currentHigh, float currentLow, int currentTime, float last2High, float last2Low, bool newTimeframe) =>
+drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, color bullColor, color bearColor, int bprWindow, color bprBull, color bprBear, bool autoThreshold, string tfLabel, float lastClose, float lastOpen, int lastTime, float currentHigh, float currentLow, int currentTime, float last2High, float last2Low, bool newTimeframe) =>
     // In 'BPR only' mode the raw FVG boxes must exist (for overlap / mitigation
     // logic) but stay invisible, so render them fully transparent.
     color bullBoxColor  = mode == BPR_ONLY ? color.new(bullColor, 100) : bullColor
     color bearBoxColor  = mode == BPR_ONLY ? color.new(bearColor, 100) : bearColor
     // BPR detection runs unless we are in pure 'FVG only' mode.
     bool  runBpr        = mode == BPR_ONLY or mode == FVG_BOTH
+    // FVG labels only shown when the FVGs themselves are visible.
+    bool  showFvgLbl    = mode == FVG_ONLY or mode == FVG_BOTH
 
     barDeltaPercent     = (lastClose - lastOpen) / (lastOpen * 100)
     threshold           = autoThreshold ? ta.cum(math.abs(newTimeframe ? barDeltaPercent : 0)) / bar_index * 2 : 0
@@ -729,10 +759,12 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
 
     if bullishFairValueGap
         currentAlerts.bullishFairValueGap := true
-        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index))
+        label bl = showFvgLbl ? label.new(bar_index, math.avg(currentLow, last2High), '+' + tfLabel + ' FVG', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(bullColor, 0), size.small) : na
+        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index, lb = bl))
     if bearishFairValueGap
         currentAlerts.bearishFairValueGap := true
-        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index))
+        label br = showFvgLbl ? label.new(bar_index, math.avg(currentHigh, last2Low), '-' + tfLabel + ' FVG', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(bearColor, 0), size.small) : na
+        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index, lb = br))
 
     // ── BPR: a bullish FVG + bearish FVG overlapping within the window ──
     // When a new FVG is added, scan the opposite-bias FVGs; if one overlaps in
@@ -761,11 +793,15 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
             box bx = box.new(chart.point.new(lastTime, na, ovTop), chart.point.new(currentTime, na, ovBot), xloc = xloc.bar_time, border_color = bprCol, bgcolor = bprCol)
             label lb = label.new(bar_index - 1, math.avg(ovTop, ovBot), 'BPR', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_center, color.new(bprCol, 0), size.small)
             bprArr.unshift(bpr.new(ovTop, ovBot, newBias, bx, lb, leftBar = bar_index - 2))
-            // Delete BOTH contributing FVGs (remove higher index first).
+            // Delete BOTH contributing FVGs + their labels (higher index first).
             nf.topBox.delete()
             nf.bottomBox.delete()
+            if not na(nf.lb)
+                nf.lb.delete()
             of.topBox.delete()
             of.bottomBox.delete()
+            if not na(of.lb)
+                of.lb.delete()
             gaps.remove(matchIdx)
             gaps.remove(0)
     true
@@ -777,14 +813,14 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
 drawFairValueGaps1() =>
     [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframeInput, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]],lookahead = barmerge.lookahead_on)
     newTimeframe = timeframe.change(fairValueGapsTimeframeInput)
-    drawFairValueGapsCore(fairValueGaps, bprs, fairValueGapsModeInput, fairValueGapBullishColor, fairValueGapBearishColor, bprWindowInput, bprBullColorInput, bprBearColorInput, fairValueGapsThresholdInput, lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
+    drawFairValueGapsCore(fairValueGaps, bprs, fairValueGapsModeInput, fairValueGapBullishColor, fairValueGapBearishColor, bprWindowInput, bprBullColorInput, bprBearColorInput, fairValueGapsThresholdInput, fvgTfLabel(fairValueGapsTimeframeInput), lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
 
 // @function            draw fair value gaps - TF2 wrapper
 // @returns             void
 drawFairValueGaps2() =>
     [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframe2Input, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]],lookahead = barmerge.lookahead_on)
     newTimeframe = timeframe.change(fairValueGapsTimeframe2Input)
-    drawFairValueGapsCore(fairValueGaps2, bprs2, fairValueGapsMode2Input, fairValueGapBullishColor2, fairValueGapBearishColor2, bprWindow2Input, bprBull2ColorInput, bprBear2ColorInput, fairValueGapsThreshold2Input, lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
+    drawFairValueGapsCore(fairValueGaps2, bprs2, fairValueGapsMode2Input, fairValueGapBullishColor2, fairValueGapBearishColor2, bprWindow2Input, bprBull2ColorInput, bprBear2ColorInput, fairValueGapsThreshold2Input, fvgTfLabel(fairValueGapsTimeframe2Input), lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
 
 // @function            get line style from string
 // @param style         line style
@@ -915,11 +951,11 @@ if showHighLowSwingsInput or showPremiumDiscountZonesInput
         drawPremiumDiscountZones()
 
 if fairValueGapsModeInput != FVG_OFF
-    maintainFairValueGaps(fairValueGaps)
-    maintainBPRs(bprs)
+    maintainFairValueGaps(fairValueGaps, fairValueGapsDeleteInput)
+    maintainBPRs(bprs, fairValueGapsDeleteInput)
 if fairValueGapsMode2Input != FVG_OFF
-    maintainFairValueGaps(fairValueGaps2)
-    maintainBPRs(bprs2)
+    maintainFairValueGaps(fairValueGaps2, fairValueGapsDelete2Input)
+    maintainBPRs(bprs2, fairValueGapsDelete2Input)
 
 getCurrentStructure(swingsLengthInput,false)
 getCurrentStructure(5,false,true)
