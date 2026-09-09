@@ -626,7 +626,13 @@ fairValueGapBox(leftTime,rightTime,topPrice,bottomPrice,boxColor) => box.new(cha
 maintainFairValueGaps() =>
     for [index,eachFairValueGap] in fairValueGaps
         if not eachFairValueGap.frozen
-            bool mitigated = (low <= eachFairValueGap.bottom and eachFairValueGap.bias == BULLISH) or (high >= eachFairValueGap.top and eachFairValueGap.bias == BEARISH)
+            // NOTE: the type's `top`/`bottom` fields are NOT ordered by price
+            // (for a bearish FVG `top` holds the lower value). Use math.min/max
+            // to get the TRUE far edge so a gap is only "fully filled" when a
+            // wick reaches its far boundary — not merely its near edge.
+            float farLow  = math.min(eachFairValueGap.top, eachFairValueGap.bottom)   // lowest boundary
+            float farHigh = math.max(eachFairValueGap.top, eachFairValueGap.bottom)   // highest boundary
+            bool mitigated = (eachFairValueGap.bias == BULLISH and low <= farLow) or (eachFairValueGap.bias == BEARISH and high >= farHigh)
             // Right edge = current bar on mitigation (freeze there), else keep
             // growing to the current bar.
             eachFairValueGap.topBox.set_right(time)
