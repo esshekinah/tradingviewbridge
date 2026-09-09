@@ -54,6 +54,7 @@ GAPS_GROUP                      = 'Fair Value Gaps'
 GAPS_GROUP2                     = 'Fair Value Gaps (2nd TF)'
 LEVELS_GROUP                    = 'Highs & Lows MTF'
 ZONES_GROUP                     = 'Premium & Discount Zones'
+SESSIONS_GROUP                  = 'Session High/Low (SAST)'
 
 modeTooltip                     = 'Allows to display historical Structure or only the recent ones'
 styleTooltip                    = 'Indicator color theme'
@@ -150,6 +151,20 @@ premiumZoneColorInput           = input.color(  RED,        'Premium Zone',     
 equilibriumZoneColorInput       = input.color(  GRAY,       'Equilibrium Zone',         group = ZONES_GROUP)
 discountZoneColorInput          = input.color(  GREEN,      'Discount Zone',            group = ZONES_GROUP)
 
+// -- Session High/Low (times are in SAST = UTC+2) --
+sessionsTz                      = 'GMT+2'
+showAsiaInput                   = input.bool(   false,      'Asia',    group = SESSIONS_GROUP, inline = 'asia')
+asiaSessionInput                = input.session('0100-1000','',        group = SESSIONS_GROUP, inline = 'asia')
+asiaColorInput                  = input.color(  color.new(#e91e63, 0), '', group = SESSIONS_GROUP, inline = 'asia')
+showLondonInput                 = input.bool(   false,      'London',  group = SESSIONS_GROUP, inline = 'london')
+londonSessionInput              = input.session('0900-1730','',        group = SESSIONS_GROUP, inline = 'london')
+londonColorInput                = input.color(  color.new(#2962ff, 0), '', group = SESSIONS_GROUP, inline = 'london')
+showNewYorkInput                = input.bool(   false,      'New York',group = SESSIONS_GROUP, inline = 'ny')
+newYorkSessionInput             = input.session('1430-2100','',        group = SESSIONS_GROUP, inline = 'ny')
+newYorkColorInput               = input.color(  color.new(#ff9800, 0), '', group = SESSIONS_GROUP, inline = 'ny')
+sessionsMitigateInput           = input.bool(   true,       'Freeze line when mitigated (wick)', group = SESSIONS_GROUP, tooltip = 'A session High line is mitigated when a later wick reaches it (high >= level); a Low line when low <= level. Once mitigated the line stops extending (frozen). Otherwise lines extend indefinitely.')
+sessionsLabelInput              = input.bool(   true,       'Show labels', group = SESSIONS_GROUP)
+
 //---------------------------------------------------------------------------------------------------------------------}
 //DATA STRUCTURES & VARIABLES
 //---------------------------------------------------------------------------------------------------------------------{
@@ -235,6 +250,27 @@ type bpr
     bool  frozen = false
     int   leftBar = na    // formation bar_index (for centering the label)
 
+// @type                            live running state for one trading session
+// @field hi/lo                     running high/low during the current session
+// @field active                    whether we are inside the session window
+type sessionState
+    float hi = na
+    float lo = na
+    bool  active = false
+
+// @type                            UDT representing a locked session High or Low level
+// @field price                     the session's high or low
+// @field isHigh                    true = session high, false = session low
+// @field ln                        the horizontal line
+// @field lb                        the right-end label
+// @field frozen                    stopped extending after being mitigated
+type sessionLevel
+    float price
+    bool  isHigh
+    line  ln
+    label lb
+    bool  frozen = false
+
 // @type                            UDT representing trend bias
 // @field bias                      BULLISH or BEARISH
 type trend
@@ -299,6 +335,8 @@ var array<bpr> bprs = array.new<bpr>()
 var array<fairValueGap> fairValueGaps2 = array.new<fairValueGap>()
 // @variable                        storage for BPR UDTs (TF2)
 var array<bpr> bprs2 = array.new<bpr>()
+// @variable                        storage for locked session High/Low levels
+var array<sessionLevel> sessionLevels = array.new<sessionLevel>()
 // @variable                        storage for parsed highs
 var array<float> parsedHighs        = array.new<float>()
 // @variable                        storage for parsed lows
@@ -942,6 +980,51 @@ drawPremiumDiscountZones() =>
 
     drawZone(trailing.bottom, math.round(0.5*(trailing.barIndex + last_bar_index)), 0.95*trailing.bottom + 0.05*trailing.top, trailing.bottom, 'Discount', discountZoneColor, label.style_label_up)
 
+// @function            extend & mitigate the stored session High/Low lines
+// Each bar: extend un-frozen session lines to the current bar; when
+// sessionsMitigateInput is on, freeze a line once a wick reaches it (High:
+// high>=price, Low: low<=price).
+// @returns             void
+maintainSessionLevels() =>
+    for [i, s] in sessionLevels
+        if not s.frozen
+            s.ln.set_x2(bar_index)
+            if not na(s.lb)
+                s.lb.set_x(bar_index)
+            if sessionsMitigateInput and ((s.isHigh and high >= s.price) or (not s.isHigh and low <= s.price))
+                s.frozen := true
+    true
+
+// @function            track one session; on session close, lock its High/Low
+// as two extended lines + labels. Uses a per-session live-state holder.
+// @param st            the session's live state holder (var)
+// @param sess          session-time string (SAST)
+// @param show          per-session enable
+// @param col           session color
+// @param name          session name for labels
+// @returns             void
+processSession(sessionState st, simple string sess, bool show, color col, string name) =>
+    if show
+        bool inSess = not na(time(timeframe.period, sess, sessionsTz))
+        if inSess
+            // Accumulate running high/low across the session.
+            st.hi := st.active ? math.max(st.hi, high) : high
+            st.lo := st.active ? math.min(st.lo, low)  : low
+            st.active := true
+        else if st.active
+            // Session just closed → lock High & Low as extended lines.
+            line hLn = line.new(bar_index - 1, st.hi, bar_index, st.hi, xloc = xloc.bar_index, extend = extend.none, color = col, width = 1)
+            line lLn = line.new(bar_index - 1, st.lo, bar_index, st.lo, xloc = xloc.bar_index, extend = extend.none, color = col, width = 1)
+            label hLb = na
+            label lLb = na
+            if sessionsLabelInput
+                hLb := label.new(bar_index, st.hi, name + ' High', xloc.bar_index, yloc.price, color.new(color.black,100), label.style_label_left, col, size.small)
+                lLb := label.new(bar_index, st.lo, name + ' Low',  xloc.bar_index, yloc.price, color.new(color.black,100), label.style_label_left, col, size.small)
+            sessionLevels.push(sessionLevel.new(st.hi, true,  hLn, hLb))
+            sessionLevels.push(sessionLevel.new(st.lo, false, lLn, lLb))
+            st.active := false
+    true
+
 //---------------------------------------------------------------------------------------------------------------------}
 //MUTABLE VARIABLES & EXECUTION
 //---------------------------------------------------------------------------------------------------------------------{
@@ -964,6 +1047,16 @@ if fairValueGapsModeInput != FVG_OFF
 if fairValueGapsMode2Input != FVG_OFF
     maintainFairValueGaps(fairValueGaps2, fairValueGapsDelete2Input)
     maintainBPRs(bprs2, fairValueGapsDelete2Input)
+
+// Session High/Low levels (Asia / London / New York, SAST).
+var sessionState asiaState   = sessionState.new()
+var sessionState londonState = sessionState.new()
+var sessionState nyState     = sessionState.new()
+processSession(asiaState,   asiaSessionInput,    showAsiaInput,    asiaColorInput,    'Asia')
+processSession(londonState, londonSessionInput,  showLondonInput,  londonColorInput,  'London')
+processSession(nyState,     newYorkSessionInput, showNewYorkInput, newYorkColorInput, 'New York')
+if showAsiaInput or showLondonInput or showNewYorkInput
+    maintainSessionLevels()
 
 getCurrentStructure(swingsLengthInput,false)
 getCurrentStructure(5,false,true)
