@@ -67,7 +67,6 @@ equalHighsLowsThresholdTooltip  = 'Sensitivity threshold in a range (0, 1) used 
 showFairValueGapsTooltip        = 'Display fair values gaps on the chart'
 fairValueGapsThresholdTooltip   = 'Filter out non significant fair value gaps'
 fairValueGapsTimeframeTooltip   = 'Fair value gaps timeframe'
-fairValueGapsExtendTooltip      = 'Determine how many bars to extend the Fair Value Gap boxes on chart'
 showPremiumDiscountZonesTooltip = 'Display premium, discount, and equilibrium zones on chart'
 
 modeInput                       = input.string( HISTORICAL, 'Mode',                     group = SMART_GROUP,    tooltip = modeTooltip, options = [HISTORICAL, PRESENT])
@@ -113,7 +112,6 @@ fairValueGapsThresholdInput     = input(        true,       'Auto Threshold',   
 fairValueGapsTimeframeInput     = input.timeframe('',       'Timeframe',                group = GAPS_GROUP,     tooltip = fairValueGapsTimeframeTooltip)
 fairValueGapsBullColorInput     = input.color(color.new(#00ff68, 70), 'Bullish FVG' , group = GAPS_GROUP)
 fairValueGapsBearColorInput     = input.color(color.new(#ff0008, 70), 'Bearish FVG' , group = GAPS_GROUP)
-fairValueGapsExtendInput        = input.int(    1,          'Extend FVG',               group = GAPS_GROUP,     tooltip = fairValueGapsExtendTooltip,       minval = 0)
 
 showDailyLevelsInput            = input(        false,      'Daily',    group = LEVELS_GROUP,   inline = 'daily')
 dailyLevelsStyleInput           = input.string( SOLID,      '',         group = LEVELS_GROUP,   inline = 'daily',   options = [SOLID,DASHED,DOTTED])
@@ -195,6 +193,7 @@ type fairValueGap
     int bias
     box topBox
     box bottomBox
+    bool frozen = false
 
 // @type                            UDT representing trend bias
 // @field bias                      BULLISH or BEARISH
@@ -615,16 +614,25 @@ displayStructure(bool internal = false) =>
 // @param bottomPrice   bottom price level
 // @param boxColor      box color
 // @returns             box ID
-fairValueGapBox(leftTime,rightTime,topPrice,bottomPrice,boxColor) => box.new(chart.point.new(leftTime,na,topPrice),chart.point.new(rightTime + fairValueGapsExtendInput * (time-time[1]),na,bottomPrice), xloc=xloc.bar_time, border_color = boxColor, bgcolor = boxColor)
+fairValueGapBox(leftTime,rightTime,topPrice,bottomPrice,boxColor) => box.new(chart.point.new(leftTime,na,topPrice),chart.point.new(rightTime,na,bottomPrice), xloc=xloc.bar_time, border_color = boxColor, bgcolor = boxColor)
 
-// @function            delete fair value gaps
+// @function            maintain fair value gaps
+// Extends every un-mitigated FVG dynamically to the CURRENT bar each candle.
+// When price fully fills the gap to its FAR edge (wick-based) — low <= bottom
+// for a bullish FVG, high >= top for a bearish FVG — the FVG is FROZEN: its
+// right edge is set to this (mitigation) bar and it stops extending. Frozen
+// FVGs are kept on the chart (not deleted).
 // @returns             fairValueGap ID
-deleteFairValueGaps() =>
+maintainFairValueGaps() =>
     for [index,eachFairValueGap] in fairValueGaps
-        if (low < eachFairValueGap.bottom and eachFairValueGap.bias == BULLISH) or (high > eachFairValueGap.top and eachFairValueGap.bias == BEARISH)
-            eachFairValueGap.topBox.delete()
-            eachFairValueGap.bottomBox.delete()
-            fairValueGaps.remove(index)
+        if not eachFairValueGap.frozen
+            bool mitigated = (low <= eachFairValueGap.bottom and eachFairValueGap.bias == BULLISH) or (high >= eachFairValueGap.top and eachFairValueGap.bias == BEARISH)
+            // Right edge = current bar on mitigation (freeze there), else keep
+            // growing to the current bar.
+            eachFairValueGap.topBox.set_right(time)
+            eachFairValueGap.bottomBox.set_right(time)
+            if mitigated
+                eachFairValueGap.frozen := true
     
 // @function            draw fair value gaps
 // @returns             fairValueGap ID
@@ -774,7 +782,7 @@ if showHighLowSwingsInput or showPremiumDiscountZonesInput
         drawPremiumDiscountZones()
 
 if showFairValueGapsInput
-    deleteFairValueGaps()
+    maintainFairValueGaps()
 
 getCurrentStructure(swingsLengthInput,false)
 getCurrentStructure(5,false,true)
