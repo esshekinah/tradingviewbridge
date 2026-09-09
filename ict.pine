@@ -36,6 +36,11 @@ RANGE                           = 'Cumulative Mean Range'
 CLOSE                           = 'Close'
 HIGHLOW                         = 'High/Low'
 
+FVG_OFF                         = 'Off'
+FVG_ONLY                        = 'FVG only'
+BPR_ONLY                        = 'BPR only'
+FVG_BOTH                        = 'Both'
+
 SOLID                           = '⎯⎯⎯'
 DASHED                          = '----'
 DOTTED                          = '····'
@@ -46,6 +51,7 @@ SWING_GROUP                     = 'Real Time Swing Structure'
 BLOCKS_GROUP                    = 'Order Blocks'
 EQUAL_GROUP                     = 'EQH/EQL'
 GAPS_GROUP                      = 'Fair Value Gaps'
+GAPS_GROUP2                     = 'Fair Value Gaps (2nd TF)'
 LEVELS_GROUP                    = 'Highs & Lows MTF'
 ZONES_GROUP                     = 'Premium & Discount Zones'
 
@@ -64,7 +70,7 @@ orderBlockMitigationTooltip     = 'Select what values to use for order block mit
 showEqualHighsLowsTooltip       = 'Display equal highs and equal lows on the chart'
 equalHighsLowsLengthTooltip     = 'Number of bars used to confirm equal highs and equal lows'
 equalHighsLowsThresholdTooltip  = 'Sensitivity threshold in a range (0, 1) used for the detection of equal highs & lows\n\nLower values will return fewer but more pertinent results'
-showFairValueGapsTooltip        = 'Display fair values gaps on the chart'
+showFairValueGapsTooltip        = 'Display mode for this timeframe\n\nOff: nothing is drawn\nFVG only: draw Fair Value Gaps, no BPR replacement\nBPR only: FVGs are detected internally (invisible) so overlaps can be found, only BPR zones are drawn\nBoth: draw Fair Value Gaps and BPR zones'
 fairValueGapsThresholdTooltip   = 'Filter out non significant fair value gaps'
 fairValueGapsTimeframeTooltip   = 'Fair value gaps timeframe'
 showPremiumDiscountZonesTooltip = 'Display premium, discount, and equilibrium zones on chart'
@@ -107,15 +113,25 @@ equalHighsLowsLengthInput       = input.int(    3,          'Bars Confirmation',
 equalHighsLowsThresholdInput    = input.float(  0.1,        'Threshold',                group = EQUAL_GROUP,    tooltip = equalHighsLowsThresholdTooltip,   minval = 0, maxval = 0.5, step = 0.1)
 equalHighsLowsSizeInput         = input.string( TINY,       'Label Size',               group = EQUAL_GROUP,    options = [TINY,SMALL,NORMAL])
 
-showFairValueGapsInput          = input(        false,      'Fair Value Gaps',          group = GAPS_GROUP,     tooltip = showFairValueGapsTooltip)
+// -- Fair Value Gaps - 1st timeframe (TF1) --
+fairValueGapsModeInput          = input.string( FVG_OFF,    'Display',                  group = GAPS_GROUP,     tooltip = showFairValueGapsTooltip,         options = [FVG_OFF, FVG_ONLY, BPR_ONLY, FVG_BOTH])
 fairValueGapsThresholdInput     = input(        true,       'Auto Threshold',           group = GAPS_GROUP,     tooltip = fairValueGapsThresholdTooltip)
 fairValueGapsTimeframeInput     = input.timeframe('',       'Timeframe',                group = GAPS_GROUP,     tooltip = fairValueGapsTimeframeTooltip)
 fairValueGapsBullColorInput     = input.color(color.new(#00ff68, 70), 'Bullish FVG' , group = GAPS_GROUP)
 fairValueGapsBearColorInput     = input.color(color.new(#ff0008, 70), 'Bearish FVG' , group = GAPS_GROUP)
-showBPRInput                    = input(        false,      'Balanced Price Range (BPR)', group = GAPS_GROUP,   tooltip = 'When a bullish FVG and a bearish FVG overlap within the max window, replace both with a single BPR zone (their overlap). BPR is mitigated by the first wick touch, then frozen.')
 bprWindowInput                  = input.int(    5,          'BPR max window (candles)', group = GAPS_GROUP,   minval = 1, maxval = 100)
 bprBullColorInput               = input.color(color.new(#26a69a, 40), 'Bullish BPR', group = GAPS_GROUP,   inline = 'bpr')
 bprBearColorInput               = input.color(color.new(#ef5350, 40), 'Bearish BPR', group = GAPS_GROUP,   inline = 'bpr')
+
+// -- Fair Value Gaps - 2nd timeframe (TF2) --
+fairValueGapsMode2Input         = input.string( FVG_OFF,    'Display',                  group = GAPS_GROUP2,    tooltip = showFairValueGapsTooltip,         options = [FVG_OFF, FVG_ONLY, BPR_ONLY, FVG_BOTH])
+fairValueGapsThreshold2Input    = input(        true,       'Auto Threshold',           group = GAPS_GROUP2,    tooltip = fairValueGapsThresholdTooltip)
+fairValueGapsTimeframe2Input    = input.timeframe('240',    'Timeframe',                group = GAPS_GROUP2,    tooltip = fairValueGapsTimeframeTooltip)
+fairValueGapsBull2ColorInput    = input.color(color.new(#00b7ff, 70), 'Bullish FVG' , group = GAPS_GROUP2)
+fairValueGapsBear2ColorInput    = input.color(color.new(#ff8c00, 70), 'Bearish FVG' , group = GAPS_GROUP2)
+bprWindow2Input                 = input.int(    5,          'BPR max window (candles)', group = GAPS_GROUP2,  minval = 1, maxval = 100)
+bprBull2ColorInput              = input.color(color.new(#2962ff, 40), 'Bullish BPR', group = GAPS_GROUP2,  inline = 'bpr2')
+bprBear2ColorInput              = input.color(color.new(#9c27b0, 40), 'Bearish BPR', group = GAPS_GROUP2,  inline = 'bpr2')
 
 showDailyLevelsInput            = input(        false,      'Daily',    group = LEVELS_GROUP,   inline = 'daily')
 dailyLevelsStyleInput           = input.string( SOLID,      '',         group = LEVELS_GROUP,   inline = 'daily',   options = [SOLID,DASHED,DOTTED])
@@ -271,10 +287,14 @@ var trend internalTrend             = trend.new(0)
 var equalDisplay equalHighDisplay   = equalDisplay.new()
 // @variable                        equal low display
 var equalDisplay equalLowDisplay    = equalDisplay.new()
-// @variable                        storage for fairValueGap UDTs
+// @variable                        storage for fairValueGap UDTs (TF1)
 var array<fairValueGap> fairValueGaps = array.new<fairValueGap>()
-// @variable                        storage for BPR UDTs
+// @variable                        storage for BPR UDTs (TF1)
 var array<bpr> bprs = array.new<bpr>()
+// @variable                        storage for fairValueGap UDTs (TF2)
+var array<fairValueGap> fairValueGaps2 = array.new<fairValueGap>()
+// @variable                        storage for BPR UDTs (TF2)
+var array<bpr> bprs2 = array.new<bpr>()
 // @variable                        storage for parsed highs
 var array<float> parsedHighs        = array.new<float>()
 // @variable                        storage for parsed lows
@@ -299,10 +319,14 @@ var array<box> internalOrderBlocksBoxes     = array.new<box>()
 var swingBullishColor               = styleInput == MONOCHROME ? MONO_BULLISH : swingBullColorInput
 // @variable                        color for swing bearish structures
 var swingBearishColor               = styleInput == MONOCHROME ? MONO_BEARISH : swingBearColorInput
-// @variable                        color for bullish fair value gaps
+// @variable                        color for bullish fair value gaps (TF1)
 var fairValueGapBullishColor        = styleInput == MONOCHROME ? color.new(MONO_BULLISH,70) : fairValueGapsBullColorInput
-// @variable                        color for bearish fair value gaps
+// @variable                        color for bearish fair value gaps (TF1)
 var fairValueGapBearishColor        = styleInput == MONOCHROME ? color.new(MONO_BEARISH,70) : fairValueGapsBearColorInput
+// @variable                        color for bullish fair value gaps (TF2)
+var fairValueGapBullishColor2       = styleInput == MONOCHROME ? color.new(MONO_BULLISH,70) : fairValueGapsBull2ColorInput
+// @variable                        color for bearish fair value gaps (TF2)
+var fairValueGapBearishColor2       = styleInput == MONOCHROME ? color.new(MONO_BEARISH,70) : fairValueGapsBear2ColorInput
 // @variable                        color for premium zone
 var premiumZoneColor                = styleInput == MONOCHROME ? MONO_BEARISH : premiumZoneColorInput
 // @variable                        color for discount zone
@@ -645,8 +669,8 @@ fairValueGapBox(leftTime,rightTime,topPrice,bottomPrice,boxColor) => box.new(cha
 // right edge is set to this (mitigation) bar and it stops extending. Frozen
 // FVGs are kept on the chart (not deleted).
 // @returns             fairValueGap ID
-maintainFairValueGaps() =>
-    for [index,eachFairValueGap] in fairValueGaps
+maintainFairValueGaps(array<fairValueGap> gaps) =>
+    for [index,eachFairValueGap] in gaps
         if not eachFairValueGap.frozen
             // The type's `top`/`bottom` fields are NOT price-ordered: for a
             // bearish FVG `top` holds the LOWER value and `bottom` the higher.
@@ -662,73 +686,105 @@ maintainFairValueGaps() =>
             eachFairValueGap.bottomBox.set_right(time)
             if mitigated
                 eachFairValueGap.frozen := true
+    true
 
 // @function            maintain BPR zones
 // Extends each un-frozen BPR to the current bar; freezes it at the first wick
 // touch of EITHER edge (even a small touch), unlike FVGs which need a full fill.
 // @returns             bpr ID
-maintainBPRs() =>
-    for [index, eachBpr] in bprs
+maintainBPRs(array<bpr> bprArr) =>
+    for [index, eachBpr] in bprArr
         if not eachBpr.frozen
             eachBpr.bx.set_right(time)
             // Keep the "BPR" label horizontally centered in the growing box.
             eachBpr.lb.set_x(math.round(math.avg(eachBpr.leftBar, bar_index)))
             if high >= eachBpr.bottom and low <= eachBpr.top   // any wick touch of the zone
                 eachBpr.frozen := true
+    true
 
-// @function            draw fair value gaps
-// @returns             fairValueGap ID
-drawFairValueGaps() => 
-    [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframeInput, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]],lookahead = barmerge.lookahead_on)
+// @function            core FVG + BPR engine, shared by both timeframes
+// @param gaps          per-timeframe FVG storage array
+// @param bprArr        per-timeframe BPR storage array
+// @param mode          display mode (FVG_ONLY / BPR_ONLY / FVG_BOTH)
+// @param bullColor     resolved bullish FVG color
+// @param bearColor     resolved bearish FVG color
+// @param bprWindow     BPR max window (candles)
+// @param bprBull       bullish BPR color
+// @param bprBear       bearish BPR color
+// @param lastClose..last2Low  values pulled from request.security in the wrapper
+// @returns             void
+drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, color bullColor, color bearColor, int bprWindow, color bprBull, color bprBear, bool autoThreshold, float lastClose, float lastOpen, int lastTime, float currentHigh, float currentLow, int currentTime, float last2High, float last2Low, bool newTimeframe) =>
+    // In 'BPR only' mode the raw FVG boxes must exist (for overlap / mitigation
+    // logic) but stay invisible, so render them fully transparent.
+    color bullBoxColor  = mode == BPR_ONLY ? color.new(bullColor, 100) : bullColor
+    color bearBoxColor  = mode == BPR_ONLY ? color.new(bearColor, 100) : bearColor
+    // BPR detection runs unless we are in pure 'FVG only' mode.
+    bool  runBpr        = mode == BPR_ONLY or mode == FVG_BOTH
 
     barDeltaPercent     = (lastClose - lastOpen) / (lastOpen * 100)
-    newTimeframe        = timeframe.change(fairValueGapsTimeframeInput)
-    threshold           = fairValueGapsThresholdInput ? ta.cum(math.abs(newTimeframe ? barDeltaPercent : 0)) / bar_index * 2 : 0
+    threshold           = autoThreshold ? ta.cum(math.abs(newTimeframe ? barDeltaPercent : 0)) / bar_index * 2 : 0
 
     bullishFairValueGap = currentLow > last2High and lastClose > last2High and barDeltaPercent > threshold and newTimeframe
     bearishFairValueGap = currentHigh < last2Low and lastClose < last2Low and -barDeltaPercent > threshold and newTimeframe
 
     if bullishFairValueGap
         currentAlerts.bullishFairValueGap := true
-        fairValueGaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),fairValueGapBullishColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,fairValueGapBullishColor), bar = bar_index))
+        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index))
     if bearishFairValueGap
         currentAlerts.bearishFairValueGap := true
-        fairValueGaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),fairValueGapBearishColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,fairValueGapBearishColor), bar = bar_index))
+        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index))
 
     // ── BPR: a bullish FVG + bearish FVG overlapping within the window ──
     // When a new FVG is added, scan the opposite-bias FVGs; if one overlaps in
-    // price and formed within `bprWindowInput` candles, replace BOTH with a
-    // single BPR box over their overlap region. Bias = the NEW (completing) FVG.
-    if showBPRInput and (bullishFairValueGap or bearishFairValueGap) and fairValueGaps.size() > 1
+    // price and formed within `bprWindow` candles, replace BOTH with a single
+    // BPR box over their overlap region. Bias = the NEW (completing) FVG.
+    if runBpr and (bullishFairValueGap or bearishFairValueGap) and gaps.size() > 1
         int newBias = bullishFairValueGap ? BULLISH : BEARISH
-        fairValueGap nf = fairValueGaps.get(0)   // just-added FVG is at index 0
+        fairValueGap nf = gaps.get(0)   // just-added FVG is at index 0
         float nfLow  = math.min(nf.top, nf.bottom)
         float nfHigh = math.max(nf.top, nf.bottom)
         // Find the first (most recent) opposite, in-window, overlapping FVG.
         int matchIdx = -1
-        for i = 1 to fairValueGaps.size() - 1
-            fairValueGap of = fairValueGaps.get(i)
-            bool inWindow = (bar_index - of.bar) <= bprWindowInput
+        for i = 1 to gaps.size() - 1
+            fairValueGap of = gaps.get(i)
+            bool inWindow = (bar_index - of.bar) <= bprWindow
             float ofLow  = math.min(of.top, of.bottom)
             float ofHigh = math.max(of.top, of.bottom)
             bool overlap = nfLow <= ofHigh and ofLow <= nfHigh
             if matchIdx == -1 and not of.frozen and of.bias != newBias and inWindow and overlap
                 matchIdx := i
         if matchIdx != -1
-            fairValueGap of = fairValueGaps.get(matchIdx)
+            fairValueGap of = gaps.get(matchIdx)
             float ovTop = math.min(nfHigh, math.max(of.top, of.bottom))
             float ovBot = math.max(nfLow,  math.min(of.top, of.bottom))
-            color bprCol = newBias == BULLISH ? bprBullColorInput : bprBearColorInput
+            color bprCol = newBias == BULLISH ? bprBull : bprBear
             box bx = box.new(chart.point.new(lastTime, na, ovTop), chart.point.new(currentTime, na, ovBot), xloc = xloc.bar_time, border_color = bprCol, bgcolor = bprCol)
             label lb = label.new(bar_index - 1, math.avg(ovTop, ovBot), 'BPR', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_center, color.new(bprCol, 0), size.small)
-            bprs.unshift(bpr.new(ovTop, ovBot, newBias, bx, lb, leftBar = bar_index - 2))
+            bprArr.unshift(bpr.new(ovTop, ovBot, newBias, bx, lb, leftBar = bar_index - 2))
             // Delete BOTH contributing FVGs (remove higher index first).
             nf.topBox.delete()
             nf.bottomBox.delete()
             of.topBox.delete()
             of.bottomBox.delete()
-            fairValueGaps.remove(matchIdx)
-            fairValueGaps.remove(0)
+            gaps.remove(matchIdx)
+            gaps.remove(0)
+    true
+
+// @function            draw fair value gaps - TF1 wrapper
+// Pulls the TF1 timeframe series via request.security (literal input so the
+// timeframe arg stays simple/const), then delegates to drawFairValueGapsCore.
+// @returns             void
+drawFairValueGaps1() =>
+    [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframeInput, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]],lookahead = barmerge.lookahead_on)
+    newTimeframe = timeframe.change(fairValueGapsTimeframeInput)
+    drawFairValueGapsCore(fairValueGaps, bprs, fairValueGapsModeInput, fairValueGapBullishColor, fairValueGapBearishColor, bprWindowInput, bprBullColorInput, bprBearColorInput, fairValueGapsThresholdInput, lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
+
+// @function            draw fair value gaps - TF2 wrapper
+// @returns             void
+drawFairValueGaps2() =>
+    [lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low] = request.security(syminfo.tickerid, fairValueGapsTimeframe2Input, [close[1], open[1], time[1], high[0], low[0], time[0], high[2], low[2]],lookahead = barmerge.lookahead_on)
+    newTimeframe = timeframe.change(fairValueGapsTimeframe2Input)
+    drawFairValueGapsCore(fairValueGaps2, bprs2, fairValueGapsMode2Input, fairValueGapBullishColor2, fairValueGapBearishColor2, bprWindow2Input, bprBull2ColorInput, bprBear2ColorInput, fairValueGapsThreshold2Input, lastClose, lastOpen, lastTime, currentHigh, currentLow, currentTime, last2High, last2Low, newTimeframe)
 
 // @function            get line style from string
 // @param style         line style
@@ -858,10 +914,12 @@ if showHighLowSwingsInput or showPremiumDiscountZonesInput
     if showPremiumDiscountZonesInput
         drawPremiumDiscountZones()
 
-if showFairValueGapsInput
-    maintainFairValueGaps()
-if showBPRInput
-    maintainBPRs()
+if fairValueGapsModeInput != FVG_OFF
+    maintainFairValueGaps(fairValueGaps)
+    maintainBPRs(bprs)
+if fairValueGapsMode2Input != FVG_OFF
+    maintainFairValueGaps(fairValueGaps2)
+    maintainBPRs(bprs2)
 
 getCurrentStructure(swingsLengthInput,false)
 getCurrentStructure(5,false,true)
@@ -881,8 +939,10 @@ if showInternalOrderBlocksInput
 if showSwingOrderBlocksInput
     deleteOrderBlocks()
 
-if showFairValueGapsInput
-    drawFairValueGaps()
+if fairValueGapsModeInput != FVG_OFF
+    drawFairValueGaps1()
+if fairValueGapsMode2Input != FVG_OFF
+    drawFairValueGaps2()
 
 if barstate.islastconfirmedhistory or barstate.islast
     if showInternalOrderBlocksInput        
