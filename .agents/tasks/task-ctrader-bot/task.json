@@ -1,0 +1,7 @@
+{
+  "task_id": "task-ctrader-bot",
+  "task_description": "Port the SMC-FVG STRATEGY from smc_fvg_strategy.pine into a new cTrader Automate (cAlgo) C# cBot (SmcFvgBot.cs) on branch feat/ctrader-bot. Reimplement the market-structure state machine, FVG-within-break detection, Internal/Swing/Both trade gate, Limit/Market entry with fib level, SL in pips, TP Points/RRR modes, concurrent-order cap, indefinite pending orders, and a Chart.DrawStaticText stats dashboard. DROP all trade-projection drawing per user instruction. Cannot be compiled in sandbox (no cAlgo assemblies); verification is static self-review; user builds in cTrader Automate.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
