@@ -39,6 +39,12 @@ STRUCT_FVG_INTERNAL             = 'Internal'
 STRUCT_FVG_SWING                = 'Swing'
 STRUCT_FVG_BOTH                 = 'Both'
 
+FIB_0                           = '0'
+FIB_025                         = '0.25'
+FIB_05                          = '0.5'
+FIB_075                         = '0.75'
+FIB_1                           = '1'
+
 modeTooltip                     = 'Allows to display historical Structure or only the recent ones'
 styleTooltip                    = 'Indicator color theme'
 showTrendTooltip                = 'Display additional candles with a color reflecting the current trend detected by structure'
@@ -78,6 +84,7 @@ slPointsInput                   = input.float(  300,        'Stop Loss (points)'
 tpPointsInput                   = input.float(  5000,       'Take Profit (points)',     group = STRATEGY_GROUP,   minval = 0)
 orderQtyInput                   = input.float(  1,          'Order Size (contracts)',   group = STRATEGY_GROUP,   minval = 0)
 maxOrdersInput                  = input.int(    100,        'Max Concurrent Orders',    group = STRATEGY_GROUP,   minval = 1, maxval = 100)
+entryFibInput                   = input.string( FIB_0,      'Entry Fib Level',          group = STRATEGY_GROUP,   options = [FIB_0, FIB_025, FIB_05, FIB_075, FIB_1], tooltip = 'Where inside the FVG the limit entry sits, from the near (proximal) edge toward the far (distal) edge. 0 = near edge (current behavior), 0.25 = 25% in, 0.5 = midpoint (CE), 0.75 = 75% in, 1 = far (deepest fill) edge. For a long the near edge is the FVG top and deeper means a lower price; for a short the near edge is the FVG bottom and deeper means a higher price.')
 
 showProjectionInput             = input.bool(   true,       'Show Projection',          group = PROJECTION_GROUP)
 tpZoneColorInput                = input.color(color.new(#2962ff, 80), 'TP Zone',        group = PROJECTION_GROUP, inline = 'proj')
@@ -319,15 +326,20 @@ maintainStructFvgs() =>
                     f.frozen := true
     true
 
-// @function            place a pending LIMIT order at an FVG near edge, with SL/TP in points,
-//                      and draw a permanent split-rectangle projection (TP zone + SL zone + entry line).
-//                      Guarded by the concurrent-order cap; projections are NEVER deleted.
+// @function            place a pending LIMIT order inside an FVG at the selected fib level,
+//                      with SL/TP in points, and draw a permanent split-rectangle projection
+//                      (TP zone + SL zone + entry line). Guarded by the concurrent-order cap;
+//                      projections are NEVER deleted.
 // @param isBull        true for a long (bullish FVG), false for a short (bearish FVG)
-// @param nearEdge      proximal edge price used as the limit entry
+// @param nearEdge      proximal edge price (fib 0)
+// @param farEdge       distal edge price (fib 1); entry = nearEdge + fib*(farEdge - nearEdge)
 // @returns             void
-placeStrategyOrder(bool isBull, float nearEdge) =>
-    if not na(nearEdge) and tradeOrders.size() < maxOrdersInput
-        float entry = nearEdge
+placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
+    if not na(nearEdge) and not na(farEdge) and tradeOrders.size() < maxOrdersInput
+        // Selected fib level (0 = near edge, 1 = far edge). Option labels are numeric
+        // strings so str.tonumber never returns na here; nz keeps it safe regardless.
+        float fibLevel = nz(str.tonumber(entryFibInput))
+        float entry = nearEdge + fibLevel * (farEdge - nearEdge)
         float sl    = isBull ? entry - slPointsInput : entry + slPointsInput
         float tp    = isBull ? entry + tpPointsInput : entry - tpPointsInput
 
@@ -440,7 +452,7 @@ displayStructure(bool internal = false) =>
             // Place a long limit order only when a new FVG was actually highlighted.
             if structFvgs.size() > fvgCountBefore
                 structFvg f = structFvgs.last()
-                placeStrategyOrder(true, f.top)
+                placeStrategyOrder(true, f.top, f.bottom)
 
         displayCondition = internal ? showInternalsInput and (showInternalBullInput == ALL or (showInternalBullInput == BOS and tag != CHOCH) or (showInternalBullInput == CHOCH and tag == CHOCH)) : showStructureInput and (showSwingBullInput == ALL or (showSwingBullInput == BOS and tag != CHOCH) or (showSwingBullInput == CHOCH and tag == CHOCH))
 
@@ -471,7 +483,7 @@ displayStructure(bool internal = false) =>
             // Place a short limit order only when a new FVG was actually highlighted.
             if structFvgs.size() > fvgCountBefore
                 structFvg f = structFvgs.last()
-                placeStrategyOrder(false, f.bottom)
+                placeStrategyOrder(false, f.bottom, f.top)
 
         displayCondition = internal ? showInternalsInput and (showInternalBearInput == ALL or (showInternalBearInput == BOS and tag != CHOCH) or (showInternalBearInput == CHOCH and tag == CHOCH)) : showStructureInput and (showSwingBearInput == ALL or (showSwingBearInput == BOS and tag != CHOCH) or (showSwingBearInput == CHOCH and tag == CHOCH))
 
