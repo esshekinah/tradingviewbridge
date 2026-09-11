@@ -122,6 +122,8 @@ fairValueGapsTimeframeInput     = input.timeframe('',       'Timeframe',        
 fairValueGapsBullColorInput     = input.color(color.new(#00ff68, 70), 'Bullish FVG' , group = GAPS_GROUP)
 fairValueGapsBearColorInput     = input.color(color.new(#ff0008, 70), 'Bearish FVG' , group = GAPS_GROUP)
 fairValueGapsDeleteInput        = input(        false,      'Delete mitigated',         group = GAPS_GROUP,     tooltip = 'When on, a FVG/BPR is removed once mitigated instead of being kept frozen on the chart.')
+showFvgLiquidityInput           = input.bool(   false,      'Show liquidity within FVG', group = GAPS_GROUP,    tooltip = 'Shades the portion of an FVG already consumed by wicks (from the near edge to the deepest wick penetration) with a different transparency, so partially-swept liquidity inside the gap is easy to spot before the FVG is fully mitigated. Applies to both FVG timeframes.')
+fvgLiquidityTranspInput         = input.int(    85,         'Liquidity transparency',    group = GAPS_GROUP,    minval = 0, maxval = 100, tooltip = '0 = opaque, 100 = invisible. Transparency of the consumed (wick-swept) sub-region.')
 bprWindowInput                  = input.int(    5,          'BPR max window (candles)', group = GAPS_GROUP,   minval = 1, maxval = 100)
 bprBullColorInput               = input.color(color.new(#26a69a, 40), 'Bullish BPR', group = GAPS_GROUP,   inline = 'bpr')
 bprBearColorInput               = input.color(color.new(#ef5350, 40), 'Bearish BPR', group = GAPS_GROUP,   inline = 'bpr')
@@ -242,6 +244,9 @@ type fairValueGap
     int bar = na       // formation bar_index
     int htfIdx = na    // formation index counted in FVG-TIMEFRAME candles (BPR window)
     label lb = na      // "+<tf> FVG" / "-<tf> FVG" label, right-edge / centered
+    box consumedBox = na  // overlay over the wick-consumed (liquidity) sub-region
+    float deepestWick = na // deepest wick penetration into the gap so far
+    color baseColor = na   // this FVG's fill color (for the consumed overlay tint)
 
 // @type                            UDT representing a Balanced Price Range (BPR)
 // @field top/bottom                price-ordered outer bounds of the overlap
@@ -809,6 +814,8 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated) =>
                 eachFairValueGap.bottomBox.delete()
                 if not na(eachFairValueGap.lb)
                     eachFairValueGap.lb.delete()
+                if not na(eachFairValueGap.consumedBox)
+                    eachFairValueGap.consumedBox.delete()
                 gaps.remove(index)
             else
                 // Right edge grows to the current bar; freeze on mitigation.
@@ -818,6 +825,27 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated) =>
                 if not na(eachFairValueGap.lb)
                     eachFairValueGap.lb.set_x(bar_index)
                     eachFairValueGap.lb.set_y(math.avg(gapLow, gapHigh))
+
+                // ── Liquidity within FVG: shade the wick-consumed sub-region ──
+                // Bullish gap fills from above → consumed band = [deepest wick
+                // low, gapHigh]. Bearish fills from below → [gapLow, deepest
+                // wick high]. Track the deepest wick penetration into the gap.
+                if showFvgLiquidityInput
+                    bool wickIn = eachFairValueGap.bias == BULLISH ? (low < gapHigh) : (high > gapLow)
+                    if wickIn
+                        float pen = eachFairValueGap.bias == BULLISH ? math.max(low, gapLow) : math.min(high, gapHigh)
+                        // Keep the deepest penetration seen so far.
+                        eachFairValueGap.deepestWick := na(eachFairValueGap.deepestWick) ? pen : (eachFairValueGap.bias == BULLISH ? math.min(eachFairValueGap.deepestWick, pen) : math.max(eachFairValueGap.deepestWick, pen))
+                        float cTop = eachFairValueGap.bias == BULLISH ? gapHigh : eachFairValueGap.deepestWick
+                        float cBot = eachFairValueGap.bias == BULLISH ? eachFairValueGap.deepestWick : gapLow
+                        color cCol = color.new(eachFairValueGap.baseColor, fvgLiquidityTranspInput)
+                        if na(eachFairValueGap.consumedBox)
+                            eachFairValueGap.consumedBox := box.new(chart.point.new(eachFairValueGap.topBox.get_left().time, na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = color.new(cCol, 100), bgcolor = cCol)
+                        else
+                            eachFairValueGap.consumedBox.set_top(cTop)
+                            eachFairValueGap.consumedBox.set_bottom(cBot)
+                            eachFairValueGap.consumedBox.set_right(time)
+
                 if mitigated
                     eachFairValueGap.frozen := true
     true
@@ -872,11 +900,11 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
     if bullishFairValueGap
         currentAlerts.bullishFairValueGap := true
         label bl = showFvgLbl ? label.new(bar_index, math.avg(currentLow, last2High), '+' + tfLabel + ' FVG', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(bullColor, 0), size.small) : na
-        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index, htfIdx = htfIdx, lb = bl))
+        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index, htfIdx = htfIdx, lb = bl, baseColor = bullColor))
     if bearishFairValueGap
         currentAlerts.bearishFairValueGap := true
         label br = showFvgLbl ? label.new(bar_index, math.avg(currentHigh, last2Low), '-' + tfLabel + ' FVG', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(bearColor, 0), size.small) : na
-        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index, htfIdx = htfIdx, lb = br))
+        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index, htfIdx = htfIdx, lb = br, baseColor = bearColor))
 
     // ── BPR: a bullish FVG + bearish FVG overlapping within the window ──
     // When a new FVG is added, scan the opposite-bias FVGs; if one overlaps in
@@ -910,10 +938,14 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
             nf.bottomBox.delete()
             if not na(nf.lb)
                 nf.lb.delete()
+            if not na(nf.consumedBox)
+                nf.consumedBox.delete()
             of.topBox.delete()
             of.bottomBox.delete()
             if not na(of.lb)
                 of.lb.delete()
+            if not na(of.consumedBox)
+                of.consumedBox.delete()
             gaps.remove(matchIdx)
             gaps.remove(0)
     true
