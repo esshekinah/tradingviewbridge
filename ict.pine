@@ -812,8 +812,35 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated, bool showL
             float gapLow  = math.min(eachFairValueGap.top, eachFairValueGap.bottom)
             float gapHigh = math.max(eachFairValueGap.top, eachFairValueGap.bottom)
             bool mitigated = (eachFairValueGap.bias == BULLISH and low <= gapLow) or (eachFairValueGap.bias == BEARISH and high >= gapHigh)
+
+            // ── Liquidity within FVG: shade the wick-consumed sub-region ──
+            // This is drawn FIRST and is INDEPENDENT of the delete-mitigated
+            // setting: any partial wick entry (from the near edge to the deepest
+            // wick penetration) is shaded, whether or not the FVG will later be
+            // deleted on full mitigation. Only tracked on bars AFTER the FVG
+            // formed so the gap's own forming candles never count as consumed.
+            if showLiquidity and bar_index > eachFairValueGap.bar + 1
+                bool wickIn = eachFairValueGap.bias == BULLISH ? (low < gapHigh) : (high > gapLow)
+                if wickIn
+                    float pen = eachFairValueGap.bias == BULLISH ? math.max(low, gapLow) : math.min(high, gapHigh)
+                    eachFairValueGap.deepestWick := na(eachFairValueGap.deepestWick) ? pen : (eachFairValueGap.bias == BULLISH ? math.min(eachFairValueGap.deepestWick, pen) : math.max(eachFairValueGap.deepestWick, pen))
+                    float cTop = eachFairValueGap.bias == BULLISH ? gapHigh : eachFairValueGap.deepestWick
+                    float cBot = eachFairValueGap.bias == BULLISH ? eachFairValueGap.deepestWick : gapLow
+                    // Normalise the hue to opaque, then apply transparency once;
+                    // solid border so the band is always visible.
+                    color liqHue = color.new(liquidityColor, 0)
+                    color cFill  = color.new(liqHue, liquidityTransp)
+                    int cLeft = na(eachFairValueGap.formTime) ? eachFairValueGap.topBox.get_left() : eachFairValueGap.formTime
+                    if na(eachFairValueGap.consumedBox)
+                        eachFairValueGap.consumedBox := box.new(chart.point.new(cLeft, na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = liqHue, border_width = 1, bgcolor = cFill)
+                    else
+                        eachFairValueGap.consumedBox.set_top(cTop)
+                        eachFairValueGap.consumedBox.set_bottom(cBot)
+                        eachFairValueGap.consumedBox.set_left(cLeft)
+                        eachFairValueGap.consumedBox.set_right(time)
+
             if mitigated and deleteMitigated
-                // Remove the FVG entirely.
+                // Remove the FVG entirely (only on FULL mitigation).
                 eachFairValueGap.topBox.delete()
                 eachFairValueGap.bottomBox.delete()
                 if not na(eachFairValueGap.lb)
@@ -829,42 +856,6 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated, bool showL
                 if not na(eachFairValueGap.lb)
                     eachFairValueGap.lb.set_x(bar_index)
                     eachFairValueGap.lb.set_y(math.avg(gapLow, gapHigh))
-
-                // ── Liquidity within FVG: shade the wick-consumed sub-region ──
-                // Bullish gap fills from above → consumed band = [deepest wick
-                // low, gapHigh]. Bearish fills from below → [gapLow, deepest
-                // wick high]. Track the deepest wick penetration into the gap.
-                // Only track consumption on bars AFTER the FVG formed, so the
-                // gap's own 3 forming candles never count as "consumed".
-                if showLiquidity and bar_index > eachFairValueGap.bar + 1
-                    bool wickIn = eachFairValueGap.bias == BULLISH ? (low < gapHigh) : (high > gapLow)
-                    if wickIn
-                        float pen = eachFairValueGap.bias == BULLISH ? math.max(low, gapLow) : math.min(high, gapHigh)
-                        // Keep the deepest penetration seen so far.
-                        eachFairValueGap.deepestWick := na(eachFairValueGap.deepestWick) ? pen : (eachFairValueGap.bias == BULLISH ? math.min(eachFairValueGap.deepestWick, pen) : math.max(eachFairValueGap.deepestWick, pen))
-                        float cTop = eachFairValueGap.bias == BULLISH ? gapHigh : eachFairValueGap.deepestWick
-                        float cBot = eachFairValueGap.bias == BULLISH ? eachFairValueGap.deepestWick : gapLow
-                        // Build the fill from the chosen hue at the configured
-                        // transparency WITHOUT stacking the input color's own
-                        // alpha on top (color.new sets, not stacks — but we
-                        // normalise the hue to opaque first so the result is
-                        // exactly `liquidityTransp`, never doubly faded). A
-                        // solid, opaque border in the same hue guarantees the
-                        // band is visible even when the fill is light.
-                        color liqHue  = color.new(liquidityColor, 0)
-                        color cFill   = color.new(liqHue, liquidityTransp)
-                        // Left edge: use the FVG's stored formation bar_time so
-                        // the overlay always has real width, independent of the
-                        // half-boxes' (possibly transparent, BPR-mode) state.
-                        int cLeft = na(eachFairValueGap.formTime) ? eachFairValueGap.topBox.get_left() : eachFairValueGap.formTime
-                        if na(eachFairValueGap.consumedBox)
-                            eachFairValueGap.consumedBox := box.new(chart.point.new(cLeft, na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = liqHue, border_width = 1, bgcolor = cFill)
-                        else
-                            eachFairValueGap.consumedBox.set_top(cTop)
-                            eachFairValueGap.consumedBox.set_bottom(cBot)
-                            eachFairValueGap.consumedBox.set_left(cLeft)
-                            eachFairValueGap.consumedBox.set_right(time)
-
                 if mitigated
                     eachFairValueGap.frozen := true
     true
