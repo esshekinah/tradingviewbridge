@@ -1,0 +1,19 @@
+{
+  "task_id": "task-smc-fvg-strategy",
+  "task_description": "Convert the SMC-FVG concept into a TradingView Pine v5 strategy: create a new file smc_fvg_strategy.pine (title 'SMC - FVG Strategy | Emmanuel') that copies the structure + FVG-in-BOS/CHoCH engine from smc_fvg.pine and adds a trading layer. On a BOS/CHoCH confirmed at candle close, place a LIMIT order at each highlighted FVG's near (proximal) edge, with SL/TP in points (defaults 300/5000), handle multiple concurrent pending orders (hard cap 100), draw a permanent split-rectangle projection (TP zone + SL zone + dotted entry line), and reuse the Internal/Swing/Both selector as the single source of truth to enable/disable trades per structure type. Leave smc_fvg.pine untouched.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null,
+  "review": {
+    "verdict": "APPROVED",
+    "iterations": 3,
+    "latest_review": ".agents/tasks/task-smc-fvg-strategy/2026-09-11-193217-review.md"
+  },
+  "verification": {
+    "build": "skipped",
+    "tests": "skipped",
+    "test_quality": "skipped",
+    "docker_build": "skipped",
+    "summary": "Pine Script cannot be compiled locally (no local Pine compiler). Verified via static self-review and grep: smc_fvg_strategy.pine has exactly one strategy() declaration (title 'SMC - FVG Strategy | Emmanuel', overlay=true, pyramiding=100, max_*_count=500) and zero indicator(); SL/TP point inputs default 300/5000; tradeOrder UDT + tradeOrders array + orderCounter added; placeStrategyOrder defined before displayStructure and called only inside the bullMakeFvg/bearMakeFvg gated blocks (reusing structFvgSourceInput as the single trade-enable source of truth); long entry=FVG top / short entry=FVG bottom; strategy.entry(limit=entry)+strategy.exit(stop,limit) with unique ids; split-rectangle projection (TP box + SL box + dotted entry line) never deleted; order cap tradeOrders.size()<maxOrdersInput (100). smc_fvg.pine byte-for-byte unchanged. User must paste into TradingView to confirm compilation. ASSUMPTION: points treated as raw price units (no mintick scaling) - flagged for user."
+  }
+}
