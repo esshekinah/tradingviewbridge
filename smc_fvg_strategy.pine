@@ -1,0 +1,463 @@
+//@version=5
+strategy('SMC - FVG Strategy | Emmanuel', 'SMC - FVG Strat', overlay = true, pyramiding = 100, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500, default_qty_type = strategy.fixed, default_qty_value = 1, calc_on_every_tick = false)
+//---------------------------------------------------------------------------------------------------------------------}
+//CONSTANTS & STRINGS & INPUTS
+//---------------------------------------------------------------------------------------------------------------------{
+BULLISH_LEG                     = 1
+BEARISH_LEG                     = 0
+
+BULLISH                         = +1
+BEARISH                         = -1
+
+GREEN                           = #089981
+RED                             = #F23645
+MONO_BULLISH                    = #b2b5be
+MONO_BEARISH                    = #5d606b
+
+HISTORICAL                      = 'Historical'
+PRESENT                         = 'Present'
+
+COLORED                         = 'Colored'
+MONOCHROME                      = 'Monochrome'
+
+ALL                             = 'All'
+BOS                             = 'BOS'
+CHOCH                           = 'CHoCH'
+
+TINY                            = size.tiny
+SMALL                           = size.small
+NORMAL                          = size.normal
+
+SMART_GROUP                     = 'Smart Money Concepts'
+INTERNAL_GROUP                  = 'Real Time Internal Structure'
+SWING_GROUP                     = 'Real Time Swing Structure'
+STRUCT_FVG_GROUP                = 'FVG in BOS/CHoCH'
+STRATEGY_GROUP                  = 'Strategy'
+PROJECTION_GROUP                = 'Trade Projection'
+
+STRUCT_FVG_INTERNAL             = 'Internal'
+STRUCT_FVG_SWING                = 'Swing'
+STRUCT_FVG_BOTH                 = 'Both'
+
+modeTooltip                     = 'Allows to display historical Structure or only the recent ones'
+styleTooltip                    = 'Indicator color theme'
+showTrendTooltip                = 'Display additional candles with a color reflecting the current trend detected by structure'
+showInternalsTooltip            = 'Display internal market structure'
+internalFilterConfluenceTooltip = 'Filter non significant internal structure breakouts'
+showStructureTooltip            = 'Display swing market Structure'
+showSwingsTooltip               = 'Display swing point as labels on the chart'
+
+modeInput                       = input.string( HISTORICAL, 'Mode',                     group = SMART_GROUP,    tooltip = modeTooltip, options = [HISTORICAL, PRESENT])
+styleInput                      = input.string( COLORED,    'Style',                    group = SMART_GROUP,    tooltip = styleTooltip,options = [COLORED, MONOCHROME])
+showTrendInput                  = input(        false,      'Color Candles',            group = SMART_GROUP,    tooltip = showTrendTooltip)
+
+showInternalsInput              = input(        true,       'Show Internal Structure',  group = INTERNAL_GROUP, tooltip = showInternalsTooltip)
+showInternalBullInput           = input.string( ALL,        'Bullish Structure',        group = INTERNAL_GROUP, inline = 'ibull', options = [ALL,BOS,CHOCH])
+internalBullColorInput          = input(        GREEN,      '',                         group = INTERNAL_GROUP, inline = 'ibull')
+showInternalBearInput           = input.string( ALL,        'Bearish Structure' ,       group = INTERNAL_GROUP, inline = 'ibear', options = [ALL,BOS,CHOCH])
+internalBearColorInput          = input(        RED,        '',                         group = INTERNAL_GROUP, inline = 'ibear')
+internalFilterConfluenceInput   = input(        false,      'Confluence Filter',        group = INTERNAL_GROUP, tooltip = internalFilterConfluenceTooltip)
+internalStructureSize           = input.string( TINY,       'Internal Label Size',      group = INTERNAL_GROUP, options = [TINY,SMALL,NORMAL])
+
+showStructureInput              = input(        true,       'Show Swing Structure',     group = SWING_GROUP,    tooltip = showStructureTooltip)
+showSwingBullInput              = input.string( ALL,        'Bullish Structure',        group = SWING_GROUP,    inline = 'bull',    options = [ALL,BOS,CHOCH])
+swingBullColorInput             = input(        GREEN,      '',                         group = SWING_GROUP,    inline = 'bull')
+showSwingBearInput              = input.string( ALL,        'Bearish Structure',        group = SWING_GROUP,    inline = 'bear',    options = [ALL,BOS,CHOCH])
+swingBearColorInput             = input(        RED,        '',                         group = SWING_GROUP,    inline = 'bear')
+swingStructureSize              = input.string( SMALL,      'Swing Label Size',         group = SWING_GROUP,    options = [TINY,SMALL,NORMAL])
+showSwingsInput                 = input(        false,      'Show Swings Points',       group = SWING_GROUP,    tooltip = showSwingsTooltip,inline = 'swings')
+swingsLengthInput               = input.int(    50,         '',                         group = SWING_GROUP,    minval = 10,                inline = 'swings')
+
+showStructFvgInput              = input.bool(   false,      'Show FVG in BOS/CHoCH',    group = STRUCT_FVG_GROUP, tooltip = 'On each internal BOS/CHoCH, highlight the LAST same-direction 3-candle FVG formed within the break leg (from the broken swing to the break bar). Detected fresh on the chart timeframe; extends right and freezes on full-fill wick mitigation.')
+structFvgBullColorInput         = input.color(color.new(#2962ff, 60), 'Bullish', group = STRUCT_FVG_GROUP, inline = 'sfvg')
+structFvgBearColorInput         = input.color(color.new(#ff5252, 60), 'Bearish', group = STRUCT_FVG_GROUP, inline = 'sfvg')
+structFvgDeleteInput            = input.bool(   false,      'Delete when mitigated',    group = STRUCT_FVG_GROUP)
+structFvgSourceInput            = input.string( STRUCT_FVG_INTERNAL, 'Apply to',        group = STRUCT_FVG_GROUP, options = [STRUCT_FVG_INTERNAL, STRUCT_FVG_SWING, STRUCT_FVG_BOTH], tooltip = 'Which structure breaks highlight the FVG within the BOS/CHoCH: Internal only, Swing only, or Both.')
+
+slPointsInput                   = input.float(  300,        'Stop Loss (points)',       group = STRATEGY_GROUP,   minval = 0)
+tpPointsInput                   = input.float(  5000,       'Take Profit (points)',     group = STRATEGY_GROUP,   minval = 0)
+orderQtyInput                   = input.float(  1,          'Order Size (contracts)',   group = STRATEGY_GROUP,   minval = 0)
+maxOrdersInput                  = input.int(    100,        'Max Concurrent Orders',    group = STRATEGY_GROUP,   minval = 1, maxval = 100)
+
+showProjectionInput             = input.bool(   true,       'Show Projection',          group = PROJECTION_GROUP)
+tpZoneColorInput                = input.color(color.new(#2962ff, 80), 'TP Zone',        group = PROJECTION_GROUP, inline = 'proj')
+slZoneColorInput                = input.color(color.new(#9c27b0, 80), 'SL Zone',        group = PROJECTION_GROUP, inline = 'proj')
+entryLineColorInput             = input.color(color.new(#787b86, 0),  'Entry Line',     group = PROJECTION_GROUP)
+projectionWidthInput            = input.int(    30,         'Projection Width (bars)',  group = PROJECTION_GROUP, minval = 1)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//TYPES
+//---------------------------------------------------------------------------------------------------------------------{
+// @type                            UDT representing structure alerts
+type alerts
+    bool internalBullishBOS         = false
+    bool internalBearishBOS         = false
+    bool internalBullishCHoCH       = false
+    bool internalBearishCHoCH       = false
+    bool swingBullishBOS            = false
+    bool swingBearishBOS            = false
+    bool swingBullishCHoCH          = false
+    bool swingBearishCHoCH          = false
+
+// @type                            UDT for the FVG highlighted inside a BOS/CHoCH
+// @field top/bottom                price-ordered outer bounds
+// @field isBull                    bullish (true) or bearish (false)
+// @field bx                        the drawn box
+// @field frozen                    stopped extending after full-fill mitigation
+type structFvg
+    float top
+    float bottom
+    bool  isBull
+    box   bx
+    bool  frozen = false
+
+// @type                            UDT for a placed strategy order and its permanent projection
+// @field id                        unique entry id used by strategy.entry/strategy.exit
+// @field entry/sl/tp               order price levels
+// @field isLong                    trade direction
+// @field tpBox/slBox               projection zone boxes (never deleted)
+// @field entryLine                 dotted horizontal entry line (never deleted)
+// @field filled                    set true once the limit order is filled
+type tradeOrder
+    string id
+    float  entry
+    float  sl
+    float  tp
+    bool   isLong
+    box    tpBox
+    box    slBox
+    line   entryLine
+    bool   filled = false
+
+// @type                            UDT representing trend bias
+// @field bias                      BULLISH or BEARISH
+type trend
+    int bias
+
+// @type                            UDT representing a pivot point (swing point)
+// @field currentLevel              current price level
+// @field lastLevel                 last price level
+// @field crossed                   true if price level is crossed
+// @field barTime                   bar time
+// @field barIndex                  bar index
+type pivot
+    float currentLevel
+    float lastLevel
+    bool crossed
+    int barTime     = time
+    int barIndex    = bar_index
+
+//---------------------------------------------------------------------------------------------------------------------}
+//VARIABLES
+//---------------------------------------------------------------------------------------------------------------------{
+// @variable                        current swing pivot high
+var pivot swingHigh                 = pivot.new(na,na,false)
+// @variable                        current swing pivot low
+var pivot swingLow                  = pivot.new(na,na,false)
+// @variable                        current internal pivot high
+var pivot internalHigh              = pivot.new(na,na,false)
+// @variable                        current internal pivot low
+var pivot internalLow               = pivot.new(na,na,false)
+// @variable                        swing trend bias
+var trend swingTrend                = trend.new(0)
+// @variable                        internal trend bias
+var trend internalTrend             = trend.new(0)
+// @variable                        storage for FVGs highlighted inside BOS/CHoCH
+var array<structFvg> structFvgs     = array.new<structFvg>()
+// @variable                        storage for placed strategy orders and their projections
+var array<tradeOrder> tradeOrders   = array.new<tradeOrder>()
+// @variable                        running counter for building unique order ids
+var int orderCounter                = 0
+// @variable                        color for swing bullish structures
+var swingBullishColor               = styleInput == MONOCHROME ? MONO_BULLISH : swingBullColorInput
+// @variable                        color for swing bearish structures
+var swingBearishColor               = styleInput == MONOCHROME ? MONO_BEARISH : swingBearColorInput
+// @variable                        alerts in current bar
+alerts currentAlerts                = alerts.new()
+
+//---------------------------------------------------------------------------------------------------------------------}
+//FUNCTIONS
+//---------------------------------------------------------------------------------------------------------------------{
+// @function            Get the value of the current leg, it can be 0 (bearish) or 1 (bullish)
+// @returns             int
+leg(int size) =>
+    var leg     = 0
+    newLegHigh  = high[size] > ta.highest( size)
+    newLegLow   = low[size]  < ta.lowest(  size)
+
+    if newLegHigh
+        leg := BEARISH_LEG
+    else if newLegLow
+        leg := BULLISH_LEG
+    leg
+
+// @function            Identify whether the current value is the start of a new leg (swing)
+// @param leg           (int) Current leg value
+// @returns             bool
+startOfNewLeg(int leg)      => ta.change(leg) != 0
+
+// @function            Identify whether the current level is the start of a new bearish leg (swing)
+// @param leg           (int) Current leg value
+// @returns             bool
+startOfBearishLeg(int leg)  => ta.change(leg) == -1
+
+// @function            Identify whether the current level is the start of a new bullish leg (swing)
+// @param leg           (int) Current leg value
+// @returns             bool
+startOfBullishLeg(int leg)  => ta.change(leg) == +1
+
+// @function            create a new label
+// @param labelTime     bar time coordinate
+// @param labelPrice    price coordinate
+// @param tag           text to display
+// @param labelColor    text color
+// @param labelStyle    label style
+// @returns             label ID
+drawLabel(int labelTime, float labelPrice, string tag, color labelColor, string labelStyle) =>
+    var label l_abel = na
+
+    if modeInput == PRESENT
+        l_abel.delete()
+
+    l_abel := label.new(chart.point.new(labelTime,na,labelPrice),tag,xloc.bar_time,color=color(na),textcolor=labelColor,style = labelStyle,size = size.small)
+
+// @function            store current structure and swing points, and also display swing points
+// @param size          (int) structure size
+// @param equalHighLow  (bool) retained for signature compatibility (unused)
+// @param internal      (bool) true for getting internal structures
+// @returns             label ID
+getCurrentStructure(int size,bool equalHighLow = false, bool internal = false) =>
+    currentLeg              = leg(size)
+    newPivot                = startOfNewLeg(currentLeg)
+    pivotLow                = startOfBullishLeg(currentLeg)
+    pivotHigh               = startOfBearishLeg(currentLeg)
+
+    if newPivot
+        if pivotLow
+            pivot p_ivot    = internal ? internalLow : swingLow
+
+            p_ivot.lastLevel    := p_ivot.currentLevel
+            p_ivot.currentLevel := low[size]
+            p_ivot.crossed      := false
+            p_ivot.barTime      := time[size]
+            p_ivot.barIndex     := bar_index[size]
+
+            if showSwingsInput and not internal and not equalHighLow
+                drawLabel(time[size], p_ivot.currentLevel, p_ivot.currentLevel < p_ivot.lastLevel ? 'LL' : 'HL', swingBullishColor, label.style_label_up)
+        else
+            pivot p_ivot = internal ? internalHigh : swingHigh
+
+            p_ivot.lastLevel    := p_ivot.currentLevel
+            p_ivot.currentLevel := high[size]
+            p_ivot.crossed      := false
+            p_ivot.barTime      := time[size]
+            p_ivot.barIndex     := bar_index[size]
+
+            if showSwingsInput and not internal and not equalHighLow
+                drawLabel(time[size], p_ivot.currentLevel, p_ivot.currentLevel > p_ivot.lastLevel ? 'HH' : 'LH', swingBearishColor, label.style_label_down)
+
+// @function            draw line and label representing a structure
+// @param p_ivot            base pivot point
+// @param tag               test to display
+// @param structureColor    base color
+// @param lineStyle         line style
+// @param labelStyle        label style
+// @param labelSize         text size
+// @returns                 label ID
+drawStructure(pivot p_ivot, string tag, color structureColor, string lineStyle, string labelStyle, string labelSize) =>
+    var line l_ine      = line.new(na,na,na,na,xloc = xloc.bar_time)
+    var label l_abel    = label.new(na,na)
+
+    if modeInput == PRESENT
+        l_ine.delete()
+        l_abel.delete()
+
+    l_ine   := line.new(chart.point.new(p_ivot.barTime,na,p_ivot.currentLevel), chart.point.new(time,na,p_ivot.currentLevel), xloc.bar_time, color=structureColor, style=lineStyle)
+    l_abel  := label.new(chart.point.new(na,math.round(0.5*(p_ivot.barIndex+bar_index)),p_ivot.currentLevel), tag, xloc.bar_index, color=color(na), textcolor=structureColor, style=labelStyle, size = labelSize)
+
+// @function            highlight the LAST same-direction FVG within a BOS/CHoCH leg
+// Scans candles from the broken swing (pivotBar) to the break bar (current)
+// for the most recent 3-candle FVG in the break direction, and draws it as a
+// box (own color) that extends right and later freezes on full-fill mitigation.
+//   Bullish leg → last bullish FVG:  low[k] > high[k+2]
+//   Bearish leg → last bearish FVG:  high[k] < low[k+2]
+// @param pivotBar      bar_index of the broken swing pivot
+// @param isBull        break direction
+// @returns             void
+highlightStructFvg(int pivotBar, bool isBull) =>
+    if showStructFvgInput and not na(pivotBar)
+        // Cap the look-back so we never index further than Pine's history buffer.
+        int span = math.min(bar_index - pivotBar, 300)   // bars back to the pivot
+        int found = -1
+        // k is the offset of the FVG's most-recent candle (candle 1 of the 3).
+        // Search from the break bar backwards; take the first (most recent) hit.
+        if span >= 2
+            for k = 0 to span - 2
+                bool hit = isBull ? (low[k] > high[k + 2]) : (high[k] < low[k + 2])
+                if found == -1 and hit
+                    found := k
+        if found != -1
+            float t = isBull ? low[found] : low[found + 2]
+            float b = isBull ? high[found + 2] : high[found]
+            color col = isBull ? structFvgBullColorInput : structFvgBearColorInput
+            box bx = box.new(bar_index - (found + 2), math.max(t, b), bar_index, math.min(t, b), xloc = xloc.bar_index, border_color = color.new(col, 0), bgcolor = col)
+            structFvgs.push(structFvg.new(math.max(t, b), math.min(t, b), isBull, bx))
+    true
+
+// @function            maintain BOS/CHoCH FVGs (extend right; freeze on full fill)
+// @returns             void
+maintainStructFvgs() =>
+    for [i, f] in structFvgs
+        if not f.frozen
+            // full-fill wick mitigation to the FAR edge (bottom for bull, top for bear)
+            bool mitigated = (f.isBull and low <= f.bottom) or (not f.isBull and high >= f.top)
+            if mitigated and structFvgDeleteInput
+                f.bx.delete()
+                structFvgs.remove(i)
+            else
+                f.bx.set_right(bar_index)
+                if mitigated
+                    f.frozen := true
+    true
+
+// @function            place a pending LIMIT order at an FVG near edge, with SL/TP in points,
+//                      and draw a permanent split-rectangle projection (TP zone + SL zone + entry line).
+//                      Guarded by the concurrent-order cap; projections are NEVER deleted.
+// @param isBull        true for a long (bullish FVG), false for a short (bearish FVG)
+// @param nearEdge      proximal edge price used as the limit entry
+// @returns             void
+placeStrategyOrder(bool isBull, float nearEdge) =>
+    if not na(nearEdge) and tradeOrders.size() < maxOrdersInput
+        float entry = nearEdge
+        float sl    = isBull ? entry - slPointsInput : entry + slPointsInput
+        float tp    = isBull ? entry + tpPointsInput : entry - tpPointsInput
+
+        orderCounter += 1
+        string id = (isBull ? 'L' : 'S') + str.tostring(orderCounter)
+
+        strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput, limit = entry)
+        strategy.exit(id + '_x', from_entry = id, stop = sl, limit = tp)
+
+        box tpBox = na
+        box slBox = na
+        line entryLine = na
+        if showProjectionInput
+            int rightBar = bar_index + projectionWidthInput
+            tpBox     := box.new(bar_index, math.max(entry, tp), rightBar, math.min(entry, tp), xloc = xloc.bar_index, border_color = color.new(tpZoneColorInput, 0), bgcolor = tpZoneColorInput)
+            slBox     := box.new(bar_index, math.max(entry, sl), rightBar, math.min(entry, sl), xloc = xloc.bar_index, border_color = color.new(slZoneColorInput, 0), bgcolor = slZoneColorInput)
+            entryLine := line.new(bar_index, entry, rightBar, entry, xloc = xloc.bar_index, color = entryLineColorInput, style = line.style_dotted)
+
+        tradeOrders.push(tradeOrder.new(id, entry, sl, tp, isBull, tpBox, slBox, entryLine))
+    true
+
+// @function            detect and draw structures, and highlight the FVG within a break
+// @param internal      true for internal structures
+// @returns             void
+displayStructure(bool internal = false) =>
+    var bullishBar = true
+    var bearishBar = true
+
+    if internalFilterConfluenceInput
+        bullishBar := high - math.max(close, open) > math.min(close, open - low)
+        bearishBar := high - math.max(close, open) < math.min(close, open - low)
+
+    pivot p_ivot    = internal ? internalHigh : swingHigh
+    trend t_rend    = internal ? internalTrend : swingTrend
+
+    lineStyle       = internal ? line.style_dashed : line.style_solid
+    labelSize       = internal ? internalStructureSize : swingStructureSize
+
+    extraCondition  = internal ? internalHigh.currentLevel != swingHigh.currentLevel and bullishBar : true
+    bullishColor    = styleInput == MONOCHROME ? MONO_BULLISH : internal ? internalBullColorInput : swingBullColorInput
+
+    if ta.crossover(close,p_ivot.currentLevel) and not p_ivot.crossed and extraCondition
+        string tag = t_rend.bias == BEARISH ? CHOCH : BOS
+
+        if internal
+            currentAlerts.internalBullishCHoCH  := tag == CHOCH
+            currentAlerts.internalBullishBOS    := tag == BOS
+        else
+            currentAlerts.swingBullishCHoCH     := tag == CHOCH
+            currentAlerts.swingBullishBOS       := tag == BOS
+
+        p_ivot.crossed  := true
+        t_rend.bias     := BULLISH
+
+        bool bullMakeFvg = showStructFvgInput and ((internal and (structFvgSourceInput == STRUCT_FVG_INTERNAL or structFvgSourceInput == STRUCT_FVG_BOTH)) or (not internal and (structFvgSourceInput == STRUCT_FVG_SWING or structFvgSourceInput == STRUCT_FVG_BOTH)))
+        if bullMakeFvg
+            int fvgCountBefore = structFvgs.size()
+            highlightStructFvg(p_ivot.barIndex, true)
+            // Place a long limit order only when a new FVG was actually highlighted.
+            if structFvgs.size() > fvgCountBefore
+                structFvg f = structFvgs.last()
+                placeStrategyOrder(true, f.top)
+
+        displayCondition = internal ? showInternalsInput and (showInternalBullInput == ALL or (showInternalBullInput == BOS and tag != CHOCH) or (showInternalBullInput == CHOCH and tag == CHOCH)) : showStructureInput and (showSwingBullInput == ALL or (showSwingBullInput == BOS and tag != CHOCH) or (showSwingBullInput == CHOCH and tag == CHOCH))
+
+        if displayCondition
+            drawStructure(p_ivot,tag,bullishColor,lineStyle,label.style_label_down,labelSize)
+
+    p_ivot          := internal ? internalLow : swingLow
+    extraCondition  := internal ? internalLow.currentLevel != swingLow.currentLevel and bearishBar : true
+    bearishColor    = styleInput == MONOCHROME ? MONO_BEARISH : internal ? internalBearColorInput : swingBearColorInput
+
+    if ta.crossunder(close,p_ivot.currentLevel) and not p_ivot.crossed and extraCondition
+        string tag = t_rend.bias == BULLISH ? CHOCH : BOS
+
+        if internal
+            currentAlerts.internalBearishCHoCH  := tag == CHOCH
+            currentAlerts.internalBearishBOS    := tag == BOS
+        else
+            currentAlerts.swingBearishCHoCH     := tag == CHOCH
+            currentAlerts.swingBearishBOS       := tag == BOS
+
+        p_ivot.crossed := true
+        t_rend.bias := BEARISH
+
+        bool bearMakeFvg = showStructFvgInput and ((internal and (structFvgSourceInput == STRUCT_FVG_INTERNAL or structFvgSourceInput == STRUCT_FVG_BOTH)) or (not internal and (structFvgSourceInput == STRUCT_FVG_SWING or structFvgSourceInput == STRUCT_FVG_BOTH)))
+        if bearMakeFvg
+            int fvgCountBefore = structFvgs.size()
+            highlightStructFvg(p_ivot.barIndex, false)
+            // Place a short limit order only when a new FVG was actually highlighted.
+            if structFvgs.size() > fvgCountBefore
+                structFvg f = structFvgs.last()
+                placeStrategyOrder(false, f.bottom)
+
+        displayCondition = internal ? showInternalsInput and (showInternalBearInput == ALL or (showInternalBearInput == BOS and tag != CHOCH) or (showInternalBearInput == CHOCH and tag == CHOCH)) : showStructureInput and (showSwingBearInput == ALL or (showSwingBearInput == BOS and tag != CHOCH) or (showSwingBearInput == CHOCH and tag == CHOCH))
+
+        if displayCondition
+            drawStructure(p_ivot,tag,bearishColor,lineStyle,label.style_label_up,labelSize)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//MUTABLE VARIABLES & EXECUTION
+//---------------------------------------------------------------------------------------------------------------------{
+parsedOpen  = showTrendInput ? open : na
+candleColor = internalTrend.bias == BULLISH ? swingBullishColor : swingBearishColor
+plotcandle(parsedOpen,high,low,close,color = candleColor, wickcolor = candleColor, bordercolor = candleColor)
+
+if showStructFvgInput
+    maintainStructFvgs()
+
+getCurrentStructure(swingsLengthInput,false)
+getCurrentStructure(5,false,true)
+
+if showInternalsInput or showTrendInput or showStructFvgInput
+    displayStructure(true)
+
+if showStructureInput
+    displayStructure()
+
+//---------------------------------------------------------------------------------------------------------------------}
+//ALERTS
+//---------------------------------------------------------------------------------------------------------------------{
+alertcondition(currentAlerts.internalBullishBOS,        'Internal Bullish BOS',         'Internal Bullish BOS formed')
+alertcondition(currentAlerts.internalBullishCHoCH,      'Internal Bullish CHoCH',       'Internal Bullish CHoCH formed')
+alertcondition(currentAlerts.internalBearishBOS,        'Internal Bearish BOS',         'Internal Bearish BOS formed')
+alertcondition(currentAlerts.internalBearishCHoCH,      'Internal Bearish CHoCH',       'Internal Bearish CHoCH formed')
+
+alertcondition(currentAlerts.swingBullishBOS,           'Bullish BOS',                  'Bullish BOS formed')
+alertcondition(currentAlerts.swingBullishCHoCH,         'Bullish CHoCH',                'Bullish CHoCH formed')
+alertcondition(currentAlerts.swingBearishBOS,           'Bearish BOS',                  'Bearish BOS formed')
+alertcondition(currentAlerts.swingBearishCHoCH,         'Bearish CHoCH',                'Bearish CHoCH formed')
+
+//---------------------------------------------------------------------------------------------------------------------}
