@@ -834,7 +834,9 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated, bool showL
                 // Bullish gap fills from above → consumed band = [deepest wick
                 // low, gapHigh]. Bearish fills from below → [gapLow, deepest
                 // wick high]. Track the deepest wick penetration into the gap.
-                if showLiquidity
+                // Only track consumption on bars AFTER the FVG formed, so the
+                // gap's own 3 forming candles never count as "consumed".
+                if showLiquidity and bar_index > eachFairValueGap.bar + 1
                     bool wickIn = eachFairValueGap.bias == BULLISH ? (low < gapHigh) : (high > gapLow)
                     if wickIn
                         float pen = eachFairValueGap.bias == BULLISH ? math.max(low, gapLow) : math.min(high, gapHigh)
