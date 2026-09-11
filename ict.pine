@@ -831,13 +831,16 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated, bool showL
                     color liqHue = color.new(liquidityColor, 0)
                     color cFill  = color.new(liqHue, liquidityTransp)
                     int cLeft = na(eachFairValueGap.formTime) ? eachFairValueGap.topBox.get_left() : eachFairValueGap.formTime
-                    if na(eachFairValueGap.consumedBox)
-                        eachFairValueGap.consumedBox := box.new(chart.point.new(cLeft, na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = liqHue, border_width = 1, bgcolor = cFill)
-                    else
-                        eachFairValueGap.consumedBox.set_top(cTop)
-                        eachFairValueGap.consumedBox.set_bottom(cBot)
-                        eachFairValueGap.consumedBox.set_left(cLeft)
-                        eachFairValueGap.consumedBox.set_right(time)
+                    // Pine renders boxes in creation (box-ID) order: later boxes
+                    // paint OVER earlier ones. With many FVGs on the chart, the
+                    // half-boxes of FVGs formed AFTER this consumed box would
+                    // otherwise cover it, hiding it. DELETE the previous overlay
+                    // and CREATE A FRESH one every active bar so the consumed
+                    // band is always among the most-recently-created boxes and
+                    // therefore drawn on top of all FVG fills.
+                    if not na(eachFairValueGap.consumedBox)
+                        eachFairValueGap.consumedBox.delete()
+                    eachFairValueGap.consumedBox := box.new(chart.point.new(cLeft, na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = liqHue, border_width = 1, bgcolor = cFill)
 
             if mitigated and deleteMitigated
                 // Remove the FVG entirely (only on FULL mitigation).
