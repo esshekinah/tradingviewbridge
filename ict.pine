@@ -1178,6 +1178,30 @@ if fairValueGapsMode2Input != FVG_OFF
     maintainFairValueGaps(fairValueGaps2, fairValueGapsDelete2Input, showFvgLiquidity2Input, fvgLiquidityColor2Input, fvgLiquidityTransp2Input)
     maintainBPRs(bprs2, fairValueGapsDelete2Input)
 
+// ===== TEMP DEBUG (remove after diagnosis) =====
+// Reports TF1 FVG runtime state so we can see where the liquidity band breaks.
+if barstate.islast
+    int dbgN = fairValueGaps.size()
+    int dbgConsumed = 0
+    int dbgActive = 0
+    string dbgLast = 'none'
+    if dbgN > 0
+        for [di, df] in fairValueGaps
+            if not df.frozen
+                dbgActive += 1
+            if not na(df.consumedBox)
+                dbgConsumed += 1
+        fairValueGap df0 = fairValueGaps.get(0)
+        dbgLast := (df0.bias == BULLISH ? '+' : '-') + ' top=' + str.tostring(df0.top) + ' bot=' + str.tostring(df0.bottom) + ' frozen=' + str.tostring(df0.frozen) + ' cBox=' + str.tostring(not na(df0.consumedBox)) + ' deepW=' + str.tostring(df0.deepestWick)
+    var table dbg = table.new(position.top_left, 1, 6, bgcolor = color.new(color.black, 0), border_width = 1)
+    table.cell(dbg, 0, 0, 'DEBUG liquidity', text_color = color.yellow, text_size = size.small)
+    table.cell(dbg, 0, 1, 'showLiquidity=' + str.tostring(showFvgLiquidityInput), text_color = color.white, text_size = size.small)
+    table.cell(dbg, 0, 2, 'FVG count=' + str.tostring(dbgN) + ' active=' + str.tostring(dbgActive), text_color = color.white, text_size = size.small)
+    table.cell(dbg, 0, 3, 'consumedBoxes=' + str.tostring(dbgConsumed), text_color = color.white, text_size = size.small)
+    table.cell(dbg, 0, 4, 'liqTransp=' + str.tostring(fvgLiquidityTranspInput), text_color = color.white, text_size = size.small)
+    table.cell(dbg, 0, 5, dbgLast, text_color = color.aqua, text_size = size.small)
+// ===== END TEMP DEBUG =====
+
 // Session High/Low levels (Asia / London / New York, SAST).
 var sessionState asiaState   = sessionState.new()
 var sessionState londonState = sessionState.new()
