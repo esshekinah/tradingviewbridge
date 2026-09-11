@@ -46,6 +46,12 @@ FIB_05                          = '0.5'
 FIB_075                         = '0.75'
 FIB_1                           = '1'
 
+TP_POINTS                       = 'Points'
+TP_RRR                          = 'RRR'
+
+ENTRY_LIMIT                     = 'Limit'
+ENTRY_MARKET                    = 'Market'
+
 DASH_TOP_LEFT                   = 'Top Left'
 DASH_TOP_CENTER                 = 'Top Center'
 DASH_TOP_RIGHT                  = 'Top Right'
@@ -93,6 +99,9 @@ structFvgSourceInput            = input.string( STRUCT_FVG_INTERNAL, 'Apply to',
 
 slPointsInput                   = input.float(  300,        'Stop Loss (points)',       group = STRATEGY_GROUP,   minval = 0)
 tpPointsInput                   = input.float(  5000,       'Take Profit (points)',     group = STRATEGY_GROUP,   minval = 0)
+tpModeInput                     = input.string( TP_POINTS,  'TP Mode',                  group = STRATEGY_GROUP,   options = [TP_POINTS, TP_RRR], tooltip = 'Points: TP is a fixed point distance. RRR: TP distance = RRR x Stop Loss point distance.')
+rrrInput                        = input.float(  3,          'Reward:Risk (RRR)',        group = STRATEGY_GROUP,   minval = 0, tooltip = 'Used when TP Mode = RRR. TP distance = RRR x SL points.')
+entryModeInput                  = input.string( ENTRY_LIMIT,'Entry Mode',               group = STRATEGY_GROUP,   options = [ENTRY_LIMIT, ENTRY_MARKET], tooltip = 'Limit: pending limit order at the FVG fib level (waits for pullback). Market: enter immediately at candle close when the BOS/CHoCH+FVG is confirmed. Fib level applies only in Limit mode.')
 orderQtyInput                   = input.float(  1,          'Order Size (contracts)',   group = STRATEGY_GROUP,   minval = 0)
 maxOrdersInput                  = input.int(    100,        'Max Concurrent Orders',    group = STRATEGY_GROUP,   minval = 1, maxval = 100)
 entryFibInput                   = input.string( FIB_0,      'Entry Fib Level',          group = STRATEGY_GROUP,   options = [FIB_0, FIB_025, FIB_05, FIB_075, FIB_1], tooltip = 'Where inside the FVG the limit entry sits, from the near (proximal) edge toward the far (distal) edge. 0 = near edge (current behavior), 0.25 = 25% in, 0.5 = midpoint (CE), 0.75 = 75% in, 1 = far (deepest fill) edge. For a long the near edge is the FVG top and deeper means a lower price; for a short the near edge is the FVG bottom and deeper means a higher price.')
@@ -192,6 +201,10 @@ var array<structFvg> structFvgs     = array.new<structFvg>()
 var array<tradeOrder> tradeOrders   = array.new<tradeOrder>()
 // @variable                        running NET points won across all closed trades (raw price units)
 var float totalPointsWon            = 0.0
+// @variable                        sum of points from WINNING trades (raw price units)
+var float totalWonPoints            = 0.0
+// @variable                        sum of points LOST on losing trades, stored as a positive magnitude
+var float totalLostPoints           = 0.0
 // @variable                        count of closed trades already folded into the dashboard stats
 var int lastProcessedClosed         = 0
 // @variable                        current consecutive winning streak
@@ -366,16 +379,26 @@ maintainStructFvgs() =>
 // @returns             void
 placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
     if not na(nearEdge) and not na(farEdge) and tradeOrders.size() < maxOrdersInput
+        // Entry Mode: Limit (default) waits for a pullback to the fib level inside the
+        // FVG; Market enters immediately at candle close (fib level ignored). In market
+        // mode the reference price for SL/TP and the projection is the candle close.
+        bool isMarket = entryModeInput == ENTRY_MARKET
         // Selected fib level (0 = near edge, 1 = far edge). Option labels are numeric
         // strings so str.tonumber never returns na here; nz keeps it safe regardless.
         float fibLevel = nz(str.tonumber(entryFibInput))
-        float entry = nearEdge + fibLevel * (farEdge - nearEdge)
+        float entry = isMarket ? close : nearEdge + fibLevel * (farEdge - nearEdge)
         float sl    = isBull ? entry - slPointsInput : entry + slPointsInput
-        float tp    = isBull ? entry + tpPointsInput : entry - tpPointsInput
+        // TP Mode: Points => fixed point distance (current behavior). RRR => TP distance
+        // is RRR x the SL point distance. SL distance is always slPointsInput.
+        float tpDist = tpModeInput == TP_RRR ? rrrInput * slPointsInput : tpPointsInput
+        float tp    = isBull ? entry + tpDist : entry - tpDist
 
         string id = (isBull ? 'L' : 'S') + str.tostring(bar_index) + '_' + str.tostring(tradeOrders.size())
 
-        strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput, limit = entry)
+        if isMarket
+            strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput)
+        else
+            strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput, limit = entry)
         strategy.exit(id + '_x', from_entry = id, stop = sl, limit = tp)
 
         box tpBox = na
@@ -558,6 +581,13 @@ if strategy.closedtrades > lastProcessedClosed
         float pts = (strategy.closedtrades.exit_price(i) - strategy.closedtrades.entry_price(i)) * math.sign(strategy.closedtrades.size(i))
         totalPointsWon := totalPointsWon + pts
 
+        // Split the per-trade points into won/lost magnitudes for the profit-factor-style
+        // Total RRR (sum of winning points / absolute sum of losing points).
+        if pts > 0
+            totalWonPoints  := totalWonPoints + pts
+        else if pts < 0
+            totalLostPoints := totalLostPoints + math.abs(pts)
+
         float p = strategy.closedtrades.profit(i)
         if p > 0
             curWinStreak  := curWinStreak + 1
@@ -578,7 +608,7 @@ dashPosition = dashboardPositionInput == DASH_TOP_LEFT ? position.top_left : das
 // (middle), Max Winning Streak.
 if showDashboardInput and barstate.islast
     if na(dashTable)
-        dashTable := table.new(position = dashPosition, columns = 2, rows = 5, border_width = 1)
+        dashTable := table.new(position = dashPosition, columns = 2, rows = 6, border_width = 1)
     // Header sits at full opacity; the stat rows get a touch of transparency so the
     // title band reads as a distinct header without needing a second color input.
     color headerBg = color.new(dashboardBgColorInput, 0)
@@ -587,6 +617,10 @@ if showDashboardInput and barstate.islast
     // 0 (guard already ensures closedtrades > 0 here).
     float winRate = strategy.wintrades / (strategy.closedtrades * 1.0) * 100
     string winRateStr = strategy.closedtrades > 0 ? str.tostring(winRate, '#.##') + '%' : 'n/a'
+    // Total RRR = profit-factor style: total winning points / absolute total losing points.
+    // Guard divide-by-zero; if there are no losses (even with wins) show 'n/a' to keep it simple.
+    float totalRRR = totalLostPoints > 0 ? totalWonPoints / totalLostPoints : na
+    string totalRRRStr = totalLostPoints > 0 ? str.tostring(totalRRR, '#.##') : 'n/a'
 
     table.cell(dashTable, 0, 0, 'SMC FVG Stats', text_color = dashboardTextColorInput, bgcolor = headerBg, text_size = size.normal)
     table.cell(dashTable, 1, 0, '', text_color = dashboardTextColorInput, bgcolor = headerBg, text_size = size.normal)
@@ -602,6 +636,9 @@ if showDashboardInput and barstate.islast
 
     table.cell(dashTable, 0, 4, 'Max Winning Streak', text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
     table.cell(dashTable, 1, 4, str.tostring(maxWinStreak), text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+
+    table.cell(dashTable, 0, 5, 'Total RRR', text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+    table.cell(dashTable, 1, 5, totalRRRStr, text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
 
 //---------------------------------------------------------------------------------------------------------------------}
 //ALERTS
