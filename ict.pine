@@ -650,6 +650,51 @@ drawOrderBlocks(bool internal = false) =>
             b_ox.set_border_color(      internal ? na : orderBlockColor)
             b_ox.set_bgcolor(           orderBlockColor)
 
+// @function            highlight the LAST same-direction FVG within a BOS/CHoCH leg
+// Scans candles from the broken swing (pivotBar) to the break bar (current)
+// for the most recent 3-candle FVG in the break direction, and draws it as a
+// box (own color) that extends right and later freezes on full-fill mitigation.
+//   Bullish leg → last bullish FVG:  low[k] > high[k+2]
+//   Bearish leg → last bearish FVG:  high[k] < low[k+2]
+// @param pivotBar      bar_index of the broken swing pivot
+// @param isBull        break direction
+// @returns             void
+highlightStructFvg(int pivotBar, bool isBull) =>
+    if showStructFvgInput and not na(pivotBar)
+        // Cap the look-back so we never index further than Pine's history buffer.
+        int span = math.min(bar_index - pivotBar, 300)   // bars back to the pivot
+        int found = -1
+        // k is the offset of the FVG's most-recent candle (candle 1 of the 3).
+        // Search from the break bar backwards; take the first (most recent) hit.
+        if span >= 2
+            for k = 0 to span - 2
+                bool hit = isBull ? (low[k] > high[k + 2]) : (high[k] < low[k + 2])
+                if found == -1 and hit
+                    found := k
+        if found != -1
+            float t = isBull ? low[found] : low[found + 2]
+            float b = isBull ? high[found + 2] : high[found]
+            color col = isBull ? structFvgBullColorInput : structFvgBearColorInput
+            box bx = box.new(bar_index - (found + 2), math.max(t, b), bar_index, math.min(t, b), xloc = xloc.bar_index, border_color = color.new(col, 0), bgcolor = col)
+            structFvgs.push(structFvg.new(math.max(t, b), math.min(t, b), isBull, bx))
+    true
+
+// @function            maintain BOS/CHoCH FVGs (extend right; freeze on full fill)
+// @returns             void
+maintainStructFvgs() =>
+    for [i, f] in structFvgs
+        if not f.frozen
+            // full-fill wick mitigation to the FAR edge (bottom for bull, top for bear)
+            bool mitigated = (f.isBull and low <= f.bottom) or (not f.isBull and high >= f.top)
+            if mitigated and structFvgDeleteInput
+                f.bx.delete()
+                structFvgs.remove(i)
+            else
+                f.bx.set_right(bar_index)
+                if mitigated
+                    f.frozen := true
+    true
+
 // @function            detect and draw structures, also detect and store order blocks
 // @param internal      true for internal structures or order blocks
 // @returns             void
@@ -730,51 +775,6 @@ displayStructure(bool internal = false) =>
 // @param boxColor      box color
 // @returns             box ID
 fairValueGapBox(leftTime,rightTime,topPrice,bottomPrice,boxColor) => box.new(chart.point.new(leftTime,na,topPrice),chart.point.new(rightTime,na,bottomPrice), xloc=xloc.bar_time, border_color = boxColor, bgcolor = boxColor)
-
-// @function            highlight the LAST same-direction FVG within a BOS/CHoCH leg
-// Scans candles from the broken swing (pivotBar) to the break bar (current)
-// for the most recent 3-candle FVG in the break direction, and draws it as a
-// box (own color) that extends right and later freezes on full-fill mitigation.
-//   Bullish leg → last bullish FVG:  low[k] > high[k+2]
-//   Bearish leg → last bearish FVG:  high[k] < low[k+2]
-// @param pivotBar      bar_index of the broken swing pivot
-// @param isBull        break direction
-// @returns             void
-highlightStructFvg(int pivotBar, bool isBull) =>
-    if showStructFvgInput and not na(pivotBar)
-        // Cap the look-back so we never index further than Pine's history buffer.
-        int span = math.min(bar_index - pivotBar, 300)   // bars back to the pivot
-        int found = -1
-        // k is the offset of the FVG's most-recent candle (candle 1 of the 3).
-        // Search from the break bar backwards; take the first (most recent) hit.
-        if span >= 2
-            for k = 0 to span - 2
-                bool hit = isBull ? (low[k] > high[k + 2]) : (high[k] < low[k + 2])
-                if found == -1 and hit
-                    found := k
-        if found != -1
-            float t = isBull ? low[found] : low[found + 2]
-            float b = isBull ? high[found + 2] : high[found]
-            color col = isBull ? structFvgBullColorInput : structFvgBearColorInput
-            box bx = box.new(bar_index - (found + 2), math.max(t, b), bar_index, math.min(t, b), xloc = xloc.bar_index, border_color = color.new(col, 0), bgcolor = col)
-            structFvgs.push(structFvg.new(math.max(t, b), math.min(t, b), isBull, bx))
-    true
-
-// @function            maintain BOS/CHoCH FVGs (extend right; freeze on full fill)
-// @returns             void
-maintainStructFvgs() =>
-    for [i, f] in structFvgs
-        if not f.frozen
-            // full-fill wick mitigation to the FAR edge (bottom for bull, top for bear)
-            bool mitigated = (f.isBull and low <= f.bottom) or (not f.isBull and high >= f.top)
-            if mitigated and structFvgDeleteInput
-                f.bx.delete()
-                structFvgs.remove(i)
-            else
-                f.bx.set_right(bar_index)
-                if mitigated
-                    f.frozen := true
-    true
 
 // @function            friendly timeframe string for FVG labels
 // Blank timeframe means the chart timeframe, so fall back to timeframe.period.
