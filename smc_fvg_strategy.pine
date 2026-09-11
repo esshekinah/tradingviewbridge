@@ -362,25 +362,45 @@ orderIsOpen(string id) =>
                 found := true
     found
 
+// @function            true if the given entry id appears among the closed trades
+// @param id            the strategy.entry id to look up
+// @returns             bool
+orderIsClosed(string id) =>
+    bool found = false
+    if strategy.closedtrades > 0
+        for k = 0 to strategy.closedtrades - 1
+            if strategy.closedtrades.entry_id(k) == id
+                found := true
+    found
+
 // @function            keep the concurrent-order cap honest: mark orders filled once their
 //                      position opens, then drop entries whose trade has since closed so the
-//                      cap counts only LIVE (pending + open) orders. Projections are NEVER
-//                      deleted here - only the cap-tracking array entry is removed, the
-//                      box/line drawings persist on the chart.
+//                      cap counts only LIVE (pending + open) orders. Closes are detected via
+//                      BOTH the open->close transition AND direct closed-trade lookup, so a
+//                      limit that fills and hits SL/TP within the SAME bar (never observed
+//                      open by this once-per-confirmed-bar prune) still frees its slot.
+//                      Projections are NEVER deleted here - only the cap-tracking array entry
+//                      is removed, the box/line drawings persist on the chart.
+// NOTE: because the cap is concurrent (not lifetime) and projections are never deleted,
+//       a very long session with many closed trades can accumulate boxes/lines past
+//       max_boxes_count/max_lines_count=500, after which Pine silently drops the oldest.
+//       Accepted per the user's request that projections stay drawn permanently.
 // @returns             void
 pruneTradeOrders() =>
     if tradeOrders.size() > 0
         for i = tradeOrders.size() - 1 to 0
             tradeOrder t = tradeOrders.get(i)
             bool isOpen = orderIsOpen(t.id)
-            if isOpen
+            bool isClosed = orderIsClosed(t.id)
+            if isClosed
+                // trade has closed (covers same-bar fill+close, where the position was
+                // never observed open). No longer live => free the cap slot WITHOUT
+                // deleting the projection.
+                tradeOrders.remove(i)
+            else if isOpen
                 // position is live: record the fill so we can detect its close later
                 t.filled := true
-            else if t.filled
-                // was filled/open and is no longer open => trade closed => no longer live.
-                // Remove from the cap-tracking store WITHOUT deleting the projection.
-                tradeOrders.remove(i)
-            // else: not filled and not open => still a pending limit order => keep (counts as live)
+            // else: not filled/open and not closed => still a pending limit => keep (live)
     true
 
 // @function            detect and draw structures, and highlight the FVG within a break
