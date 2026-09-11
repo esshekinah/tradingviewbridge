@@ -154,6 +154,7 @@ monthlyLevelsStyleInput         = input.string( SOLID,      '',         group = 
 monthlyLevelsColorInput         = input(        BLUE,       '',         group = LEVELS_GROUP,   inline = 'monthly')
 
 showPremiumDiscountZonesInput   = input(        false,      'Premium/Discount Zones',   group = ZONES_GROUP , tooltip = showPremiumDiscountZonesTooltip)
+premiumDiscountTimeframeInput   = input.timeframe('',       'Timeframe',                group = ZONES_GROUP , tooltip = 'Blank = current chart timeframe (default). Set a higher timeframe to build the Premium/Discount range from that timeframe\'s most recent swing high/low, so you can view HTF Premium/Discount zones on a lower-timeframe chart.')
 premiumZoneColorInput           = input.color(  RED,        'Premium Zone',             group = ZONES_GROUP)
 equilibriumZoneColorInput       = input.color(  GRAY,       'Equilibrium Zone',         group = ZONES_GROUP)
 discountZoneColorInput          = input.color(  GREEN,      'Discount Zone',            group = ZONES_GROUP)
@@ -1033,24 +1034,31 @@ drawHighLowSwings() =>
 // @param zoneColor     base color
 // @param style         label style
 // @returns             void
-drawZone(float labelLevel, int labelIndex, float top, float bottom, string tag, color zoneColor, string style) =>
+drawZone(float labelLevel, int labelIndex, float top, float bottom, string tag, color zoneColor, string style, int leftTime = na) =>
     var label l_abel    = label.new(na,na,text = tag, color=color(na),textcolor = zoneColor, style = style, size = size.small)
     var box b_ox        = box.new(na,na,na,na,bgcolor = color.new(zoneColor,80),border_color = color(na), xloc = xloc.bar_time)
 
-    b_ox.set_top_left_point(    chart.point.new(trailing.barTime,na,top))
+    b_ox.set_top_left_point(    chart.point.new(na(leftTime) ? trailing.barTime : leftTime,na,top))
     b_ox.set_bottom_right_point(chart.point.new(last_bar_time,na,bottom))
 
     l_abel.set_point(           chart.point.new(na,labelIndex,labelLevel))
 
 // @function            draw premium/discount zones
 // @returns             void
-drawPremiumDiscountZones() =>
-    drawZone(trailing.top, math.round(0.5*(trailing.barIndex + last_bar_index)), trailing.top, 0.95*trailing.top + 0.05*trailing.bottom, 'Premium', premiumZoneColor, label.style_label_down)
+drawPremiumDiscountZones(bool useHtf, float htfTop, float htfBot, int htfTopTime, int htfBotTime) =>
+    float zTop  = useHtf ? htfTop : trailing.top
+    float zBot  = useHtf ? htfBot : trailing.bottom
+    // Left edge of the boxes: HTF earliest of the two swing times, else na so
+    // drawZone falls back to the chart-TF trailing swing time.
+    int   zLeft = useHtf ? math.min(htfTopTime, htfBotTime) : na
 
-    equilibriumLevel = math.avg(trailing.top, trailing.bottom)
-    drawZone(equilibriumLevel, last_bar_index, 0.525*trailing.top + 0.475*trailing.bottom, 0.525*trailing.bottom + 0.475*trailing.top, 'Equilibrium', equilibriumZoneColorInput, label.style_label_left)
+    if not na(zTop) and not na(zBot)
+        drawZone(zTop, math.round(0.5*(trailing.barIndex + last_bar_index)), zTop, 0.95*zTop + 0.05*zBot, 'Premium', premiumZoneColor, label.style_label_down, zLeft)
 
-    drawZone(trailing.bottom, math.round(0.5*(trailing.barIndex + last_bar_index)), 0.95*trailing.bottom + 0.05*trailing.top, trailing.bottom, 'Discount', discountZoneColor, label.style_label_up)
+        equilibriumLevel = math.avg(zTop, zBot)
+        drawZone(equilibriumLevel, last_bar_index, 0.525*zTop + 0.475*zBot, 0.525*zBot + 0.475*zTop, 'Equilibrium', equilibriumZoneColorInput, label.style_label_left, zLeft)
+
+        drawZone(zBot, math.round(0.5*(trailing.barIndex + last_bar_index)), 0.95*zBot + 0.05*zTop, zBot, 'Discount', discountZoneColor, label.style_label_up, zLeft)
 
 // @function            extend & mitigate the stored session High/Low lines
 // Each bar: extend un-frozen session lines to the current bar; when
@@ -1104,6 +1112,14 @@ parsedOpen  = showTrendInput ? open : na
 candleColor = internalTrend.bias == BULLISH ? swingBullishColor : swingBearishColor
 plotcandle(parsedOpen,high,low,close,color = candleColor, wickcolor = candleColor, bordercolor = candleColor)
 
+// Premium/Discount range source. Blank timeframe (or the chart's own) uses the
+// chart-TF trailing swings; otherwise pull the chosen HTF's most recent
+// confirmed swing high/low (pivots of length swingsLengthInput) + their times.
+// request.security is evaluated unconditionally (never inside an if) and is
+// non-repainting (lookahead_off).
+bool pdUseHtf = premiumDiscountTimeframeInput != '' and premiumDiscountTimeframeInput != timeframe.period
+[pdHtfTop, pdHtfBot, pdHtfTopTime, pdHtfBotTime] = request.security(syminfo.tickerid, premiumDiscountTimeframeInput == '' ? timeframe.period : premiumDiscountTimeframeInput, [ta.valuewhen(not na(ta.pivothigh(high, swingsLengthInput, swingsLengthInput)), high[swingsLengthInput], 0), ta.valuewhen(not na(ta.pivotlow(low, swingsLengthInput, swingsLengthInput)), low[swingsLengthInput], 0), ta.valuewhen(not na(ta.pivothigh(high, swingsLengthInput, swingsLengthInput)), time[swingsLengthInput], 0), ta.valuewhen(not na(ta.pivotlow(low, swingsLengthInput, swingsLengthInput)), time[swingsLengthInput], 0)], lookahead = barmerge.lookahead_off)
+
 if showHighLowSwingsInput or showPremiumDiscountZonesInput
     updateTrailingExtremes()
 
@@ -1111,7 +1127,7 @@ if showHighLowSwingsInput or showPremiumDiscountZonesInput
         drawHighLowSwings()
 
     if showPremiumDiscountZonesInput
-        drawPremiumDiscountZones()
+        drawPremiumDiscountZones(pdUseHtf, pdHtfTop, pdHtfBot, pdHtfTopTime, pdHtfBotTime)
 
 if fairValueGapsModeInput != FVG_OFF
     maintainFairValueGaps(fairValueGaps, fairValueGapsDeleteInput)
