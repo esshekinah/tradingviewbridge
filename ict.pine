@@ -248,9 +248,10 @@ type fairValueGap
     int bar = na       // formation bar_index
     int htfIdx = na    // formation index counted in FVG-TIMEFRAME candles (BPR window)
     label lb = na      // "+<tf> FVG" / "-<tf> FVG" label, right-edge / centered
-    box consumedBox = na  // overlay over the wick-consumed (liquidity) sub-region
-    float deepestWick = na // deepest wick penetration into the gap so far
-    int formTime = na      // formation bar_time (left edge for the consumed overlay)
+    line consumedLine = na  // liquidity line at the deepest wick penetration
+    label consumedLabel = na // "$$$" label at the right end of the liquidity line
+    float deepestWick = na  // deepest wick penetration into the gap so far
+    int formTime = na       // formation bar_time (left edge for the liquidity line)
 
 // @type                            UDT representing a Balanced Price Range (BPR)
 // @field top/bottom                price-ordered outer bounds of the overlap
@@ -813,34 +814,28 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated, bool showL
             float gapHigh = math.max(eachFairValueGap.top, eachFairValueGap.bottom)
             bool mitigated = (eachFairValueGap.bias == BULLISH and low <= gapLow) or (eachFairValueGap.bias == BEARISH and high >= gapHigh)
 
-            // ── Liquidity within FVG: shade the wick-consumed sub-region ──
-            // This is drawn FIRST and is INDEPENDENT of the delete-mitigated
-            // setting: any partial wick entry (from the near edge to the deepest
-            // wick penetration) is shaded, whether or not the FVG will later be
-            // deleted on full mitigation. Only tracked on bars AFTER the FVG
-            // formed so the gap's own forming candles never count as consumed.
+            // ── Liquidity within FVG: line at the deepest wick penetration ──
+            // Drawn FIRST and INDEPENDENT of the delete-mitigated setting: any
+            // partial wick entry marks a liquidity level (the deepest wick that
+            // has poked into the gap) with a horizontal line + "$$$" label that
+            // extends right. Only tracked on bars AFTER the FVG formed so the
+            // gap's own forming candles never count as consumed.
             if showLiquidity and bar_index > eachFairValueGap.bar + 1
                 bool wickIn = eachFairValueGap.bias == BULLISH ? (low < gapHigh) : (high > gapLow)
                 if wickIn
                     float pen = eachFairValueGap.bias == BULLISH ? math.max(low, gapLow) : math.min(high, gapHigh)
                     eachFairValueGap.deepestWick := na(eachFairValueGap.deepestWick) ? pen : (eachFairValueGap.bias == BULLISH ? math.min(eachFairValueGap.deepestWick, pen) : math.max(eachFairValueGap.deepestWick, pen))
-                    float cTop = eachFairValueGap.bias == BULLISH ? gapHigh : eachFairValueGap.deepestWick
-                    float cBot = eachFairValueGap.bias == BULLISH ? eachFairValueGap.deepestWick : gapLow
-                    // Normalise the hue to opaque, then apply transparency once;
-                    // solid border so the band is always visible.
-                    color liqHue = color.new(liquidityColor, 0)
-                    color cFill  = color.new(liqHue, liquidityTransp)
+                    color liqCol = color.new(liquidityColor, liquidityTransp)
                     int cLeft = na(eachFairValueGap.formTime) ? eachFairValueGap.topBox.get_left() : eachFairValueGap.formTime
-                    // Pine renders boxes in creation (box-ID) order: later boxes
-                    // paint OVER earlier ones. With many FVGs on the chart, the
-                    // half-boxes of FVGs formed AFTER this consumed box would
-                    // otherwise cover it, hiding it. DELETE the previous overlay
-                    // and CREATE A FRESH one every active bar so the consumed
-                    // band is always among the most-recently-created boxes and
-                    // therefore drawn on top of all FVG fills.
-                    if not na(eachFairValueGap.consumedBox)
-                        eachFairValueGap.consumedBox.delete()
-                    eachFairValueGap.consumedBox := box.new(chart.point.new(cLeft, na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = liqHue, border_width = 1, bgcolor = cFill)
+                    if na(eachFairValueGap.consumedLine)
+                        eachFairValueGap.consumedLine  := line.new(cLeft, eachFairValueGap.deepestWick, time, eachFairValueGap.deepestWick, xloc = xloc.bar_time, color = liqCol, width = 1)
+                        eachFairValueGap.consumedLabel := label.new(time, eachFairValueGap.deepestWick, '$$$', xloc.bar_time, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(liquidityColor, 0), size.small)
+                    else
+                        eachFairValueGap.consumedLine.set_y1(eachFairValueGap.deepestWick)
+                        eachFairValueGap.consumedLine.set_y2(eachFairValueGap.deepestWick)
+                        eachFairValueGap.consumedLine.set_x2(time)
+                        eachFairValueGap.consumedLabel.set_y(eachFairValueGap.deepestWick)
+                        eachFairValueGap.consumedLabel.set_x(time)
 
             if mitigated and deleteMitigated
                 // Remove the FVG entirely (only on FULL mitigation).
@@ -848,8 +843,10 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated, bool showL
                 eachFairValueGap.bottomBox.delete()
                 if not na(eachFairValueGap.lb)
                     eachFairValueGap.lb.delete()
-                if not na(eachFairValueGap.consumedBox)
-                    eachFairValueGap.consumedBox.delete()
+                if not na(eachFairValueGap.consumedLine)
+                    eachFairValueGap.consumedLine.delete()
+                if not na(eachFairValueGap.consumedLabel)
+                    eachFairValueGap.consumedLabel.delete()
                 gaps.remove(index)
             else
                 // Right edge grows to the current bar; freeze on mitigation.
@@ -951,14 +948,18 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
             nf.bottomBox.delete()
             if not na(nf.lb)
                 nf.lb.delete()
-            if not na(nf.consumedBox)
-                nf.consumedBox.delete()
+            if not na(nf.consumedLine)
+                nf.consumedLine.delete()
+            if not na(nf.consumedLabel)
+                nf.consumedLabel.delete()
             of.topBox.delete()
             of.bottomBox.delete()
             if not na(of.lb)
                 of.lb.delete()
-            if not na(of.consumedBox)
-                of.consumedBox.delete()
+            if not na(of.consumedLine)
+                of.consumedLine.delete()
+            if not na(of.consumedLabel)
+                of.consumedLabel.delete()
             gaps.remove(matchIdx)
             gaps.remove(0)
     true
