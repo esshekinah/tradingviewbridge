@@ -117,7 +117,8 @@ type structFvg
 // @field isLong                    trade direction
 // @field tpBox/slBox               projection zone boxes (never deleted)
 // @field entryLine                 dotted horizontal entry line (never deleted)
-// @field filled                    set true once the limit order is filled
+// @field filled                    set true once the order's position opens; used by
+//                                  pruneTradeOrders to detect a subsequent close and free a cap slot
 type tradeOrder
     string id
     float  entry
@@ -350,6 +351,38 @@ placeStrategyOrder(bool isBull, float nearEdge) =>
         tradeOrders.push(tradeOrder.new(id, entry, sl, tp, isBull, tpBox, slBox, entryLine))
     true
 
+// @function            true if the given entry id currently has an open position
+// @param id            the strategy.entry id to look up
+// @returns             bool
+orderIsOpen(string id) =>
+    bool found = false
+    if strategy.opentrades > 0
+        for k = 0 to strategy.opentrades - 1
+            if strategy.opentrades.entry_id(k) == id
+                found := true
+    found
+
+// @function            keep the concurrent-order cap honest: mark orders filled once their
+//                      position opens, then drop entries whose trade has since closed so the
+//                      cap counts only LIVE (pending + open) orders. Projections are NEVER
+//                      deleted here - only the cap-tracking array entry is removed, the
+//                      box/line drawings persist on the chart.
+// @returns             void
+pruneTradeOrders() =>
+    if tradeOrders.size() > 0
+        for i = tradeOrders.size() - 1 to 0
+            tradeOrder t = tradeOrders.get(i)
+            bool isOpen = orderIsOpen(t.id)
+            if isOpen
+                // position is live: record the fill so we can detect its close later
+                t.filled := true
+            else if t.filled
+                // was filled/open and is no longer open => trade closed => no longer live.
+                // Remove from the cap-tracking store WITHOUT deleting the projection.
+                tradeOrders.remove(i)
+            // else: not filled and not open => still a pending limit order => keep (counts as live)
+    true
+
 // @function            detect and draw structures, and highlight the FVG within a break
 // @param internal      true for internal structures
 // @returns             void
@@ -437,6 +470,9 @@ plotcandle(parsedOpen,high,low,close,color = candleColor, wickcolor = candleColo
 
 if showStructFvgInput
     maintainStructFvgs()
+
+// Keep the concurrent-order cap accurate (prune closed orders; projections stay).
+pruneTradeOrders()
 
 getCurrentStructure(swingsLengthInput,false)
 getCurrentStructure(5,false,true)
