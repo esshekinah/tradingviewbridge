@@ -840,7 +840,7 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated) =>
                         float cBot = eachFairValueGap.bias == BULLISH ? eachFairValueGap.deepestWick : gapLow
                         color cCol = color.new(eachFairValueGap.baseColor, fvgLiquidityTranspInput)
                         if na(eachFairValueGap.consumedBox)
-                            eachFairValueGap.consumedBox := box.new(chart.point.new(eachFairValueGap.topBox.get_left().time, na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = color.new(cCol, 100), bgcolor = cCol)
+                            eachFairValueGap.consumedBox := box.new(chart.point.new(eachFairValueGap.topBox.get_left(), na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = color.new(cCol, 100), bgcolor = cCol)
                         else
                             eachFairValueGap.consumedBox.set_top(cTop)
                             eachFairValueGap.consumedBox.set_bottom(cBot)
