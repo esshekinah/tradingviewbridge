@@ -250,7 +250,7 @@ type fairValueGap
     label lb = na      // "+<tf> FVG" / "-<tf> FVG" label, right-edge / centered
     box consumedBox = na  // overlay over the wick-consumed (liquidity) sub-region
     float deepestWick = na // deepest wick penetration into the gap so far
-    color baseColor = na   // this FVG's fill color (for the consumed overlay tint)
+    int formTime = na      // formation bar_time (left edge for the consumed overlay)
 
 // @type                            UDT representing a Balanced Price Range (BPR)
 // @field top/bottom                price-ordered outer bounds of the overlap
@@ -844,12 +844,25 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated, bool showL
                         eachFairValueGap.deepestWick := na(eachFairValueGap.deepestWick) ? pen : (eachFairValueGap.bias == BULLISH ? math.min(eachFairValueGap.deepestWick, pen) : math.max(eachFairValueGap.deepestWick, pen))
                         float cTop = eachFairValueGap.bias == BULLISH ? gapHigh : eachFairValueGap.deepestWick
                         float cBot = eachFairValueGap.bias == BULLISH ? eachFairValueGap.deepestWick : gapLow
-                        color cCol = color.new(liquidityColor, liquidityTransp)
+                        // Build the fill from the chosen hue at the configured
+                        // transparency WITHOUT stacking the input color's own
+                        // alpha on top (color.new sets, not stacks — but we
+                        // normalise the hue to opaque first so the result is
+                        // exactly `liquidityTransp`, never doubly faded). A
+                        // solid, opaque border in the same hue guarantees the
+                        // band is visible even when the fill is light.
+                        color liqHue  = color.new(liquidityColor, 0)
+                        color cFill   = color.new(liqHue, liquidityTransp)
+                        // Left edge: use the FVG's stored formation bar_time so
+                        // the overlay always has real width, independent of the
+                        // half-boxes' (possibly transparent, BPR-mode) state.
+                        int cLeft = na(eachFairValueGap.formTime) ? eachFairValueGap.topBox.get_left() : eachFairValueGap.formTime
                         if na(eachFairValueGap.consumedBox)
-                            eachFairValueGap.consumedBox := box.new(chart.point.new(eachFairValueGap.topBox.get_left(), na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = color.new(cCol, 100), bgcolor = cCol)
+                            eachFairValueGap.consumedBox := box.new(chart.point.new(cLeft, na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = liqHue, border_width = 1, bgcolor = cFill)
                         else
                             eachFairValueGap.consumedBox.set_top(cTop)
                             eachFairValueGap.consumedBox.set_bottom(cBot)
+                            eachFairValueGap.consumedBox.set_left(cLeft)
                             eachFairValueGap.consumedBox.set_right(time)
 
                 if mitigated
@@ -906,11 +919,11 @@ drawFairValueGapsCore(array<fairValueGap> gaps, array<bpr> bprArr, string mode, 
     if bullishFairValueGap
         currentAlerts.bullishFairValueGap := true
         label bl = showFvgLbl ? label.new(bar_index, math.avg(currentLow, last2High), '+' + tfLabel + ' FVG', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(bullColor, 0), size.small) : na
-        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index, htfIdx = htfIdx, lb = bl, baseColor = bullColor))
+        gaps.unshift(fairValueGap.new(currentLow,last2High,BULLISH,fairValueGapBox(lastTime,currentTime,currentLow,math.avg(currentLow,last2High),bullBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentLow,last2High),last2High,bullBoxColor), bar = bar_index, htfIdx = htfIdx, lb = bl, formTime = lastTime))
     if bearishFairValueGap
         currentAlerts.bearishFairValueGap := true
         label br = showFvgLbl ? label.new(bar_index, math.avg(currentHigh, last2Low), '-' + tfLabel + ' FVG', xloc.bar_index, yloc.price, color.new(color.black, 100), label.style_label_left, color.new(bearColor, 0), size.small) : na
-        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index, htfIdx = htfIdx, lb = br, baseColor = bearColor))
+        gaps.unshift(fairValueGap.new(currentHigh,last2Low,BEARISH,fairValueGapBox(lastTime,currentTime,currentHigh,math.avg(currentHigh,last2Low),bearBoxColor),fairValueGapBox(lastTime,currentTime,math.avg(currentHigh,last2Low),last2Low,bearBoxColor), bar = bar_index, htfIdx = htfIdx, lb = br, formTime = lastTime))
 
     // ── BPR: a bullish FVG + bearish FVG overlapping within the window ──
     // When a new FVG is added, scan the opposite-bias FVGs; if one overlaps in
