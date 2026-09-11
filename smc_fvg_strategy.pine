@@ -167,8 +167,6 @@ var trend internalTrend             = trend.new(0)
 var array<structFvg> structFvgs     = array.new<structFvg>()
 // @variable                        storage for placed strategy orders and their projections
 var array<tradeOrder> tradeOrders   = array.new<tradeOrder>()
-// @variable                        running counter for building unique order ids
-var int orderCounter                = 0
 // @variable                        color for swing bullish structures
 var swingBullishColor               = styleInput == MONOCHROME ? MONO_BULLISH : swingBullColorInput
 // @variable                        color for swing bearish structures
@@ -333,8 +331,7 @@ placeStrategyOrder(bool isBull, float nearEdge) =>
         float sl    = isBull ? entry - slPointsInput : entry + slPointsInput
         float tp    = isBull ? entry + tpPointsInput : entry - tpPointsInput
 
-        orderCounter += 1
-        string id = (isBull ? 'L' : 'S') + str.tostring(orderCounter)
+        string id = (isBull ? 'L' : 'S') + str.tostring(bar_index) + '_' + str.tostring(tradeOrders.size())
 
         strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput, limit = entry)
         strategy.exit(id + '_x', from_entry = id, stop = sl, limit = tp)
