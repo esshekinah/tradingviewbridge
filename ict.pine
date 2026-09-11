@@ -122,7 +122,7 @@ fairValueGapsTimeframeInput     = input.timeframe('',       'Timeframe',        
 fairValueGapsBullColorInput     = input.color(color.new(#00ff68, 70), 'Bullish FVG' , group = GAPS_GROUP)
 fairValueGapsBearColorInput     = input.color(color.new(#ff0008, 70), 'Bearish FVG' , group = GAPS_GROUP)
 fairValueGapsDeleteInput        = input(        false,      'Delete mitigated',         group = GAPS_GROUP,     tooltip = 'When on, a FVG/BPR is removed once mitigated instead of being kept frozen on the chart.')
-showFvgLiquidityInput           = input.bool(   false,      'Show liquidity within FVG', group = GAPS_GROUP,    tooltip = 'Shades the portion of an FVG already consumed by wicks (from the near edge to the deepest wick penetration) with a different transparency, so partially-swept liquidity inside the gap is easy to spot before the FVG is fully mitigated. Applies to both FVG timeframes.')
+showFvgLiquidityInput           = input.bool(   false,      'Show liquidity within FVG', group = GAPS_GROUP,    tooltip = 'Shades the portion of an FVG already consumed by wicks (from the near edge to the deepest wick penetration) with a different transparency, so partially-swept liquidity inside the gap is easy to spot before the FVG is fully mitigated.')
 fvgLiquidityTranspInput         = input.int(    85,         'Liquidity transparency',    group = GAPS_GROUP,    minval = 0, maxval = 100, tooltip = '0 = opaque, 100 = invisible. Transparency of the consumed (wick-swept) sub-region.')
 bprWindowInput                  = input.int(    5,          'BPR max window (candles)', group = GAPS_GROUP,   minval = 1, maxval = 100)
 bprBullColorInput               = input.color(color.new(#26a69a, 40), 'Bullish BPR', group = GAPS_GROUP,   inline = 'bpr')
@@ -135,6 +135,8 @@ fairValueGapsTimeframe2Input    = input.timeframe('240',    'Timeframe',        
 fairValueGapsBull2ColorInput    = input.color(color.new(#00b7ff, 70), 'Bullish FVG' , group = GAPS_GROUP2)
 fairValueGapsBear2ColorInput    = input.color(color.new(#ff8c00, 70), 'Bearish FVG' , group = GAPS_GROUP2)
 fairValueGapsDelete2Input       = input(        false,      'Delete mitigated',         group = GAPS_GROUP2,    tooltip = 'When on, a FVG/BPR is removed once mitigated instead of being kept frozen on the chart.')
+showFvgLiquidity2Input          = input.bool(   false,      'Show liquidity within FVG', group = GAPS_GROUP2,   tooltip = 'Shades the portion of an FVG already consumed by wicks (from the near edge to the deepest wick penetration) with a different transparency, so partially-swept liquidity inside the gap is easy to spot before the FVG is fully mitigated.')
+fvgLiquidityTransp2Input        = input.int(    85,         'Liquidity transparency',    group = GAPS_GROUP2,   minval = 0, maxval = 100, tooltip = '0 = opaque, 100 = invisible. Transparency of the consumed (wick-swept) sub-region.')
 bprWindow2Input                 = input.int(    5,          'BPR max window (candles)', group = GAPS_GROUP2,  minval = 1, maxval = 100)
 bprBull2ColorInput              = input.color(color.new(#2962ff, 40), 'Bullish BPR', group = GAPS_GROUP2,  inline = 'bpr2')
 bprBear2ColorInput              = input.color(color.new(#9c27b0, 40), 'Bearish BPR', group = GAPS_GROUP2,  inline = 'bpr2')
@@ -797,7 +799,7 @@ fvgTfLabel(simple string tf) => tf == '' ? timeframe.period : tf
 // If `deleteMitigated` is true, a mitigated FVG is REMOVED instead of frozen.
 // The "+<tf> FVG" label is kept at the box's right edge, vertically centered.
 // @returns             fairValueGap ID
-maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated) =>
+maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated, bool showLiquidity, int liquidityTransp) =>
     for [index,eachFairValueGap] in gaps
         if not eachFairValueGap.frozen
             // The type's `top`/`bottom` fields are NOT price-ordered: for a
@@ -830,7 +832,7 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated) =>
                 // Bullish gap fills from above → consumed band = [deepest wick
                 // low, gapHigh]. Bearish fills from below → [gapLow, deepest
                 // wick high]. Track the deepest wick penetration into the gap.
-                if showFvgLiquidityInput
+                if showLiquidity
                     bool wickIn = eachFairValueGap.bias == BULLISH ? (low < gapHigh) : (high > gapLow)
                     if wickIn
                         float pen = eachFairValueGap.bias == BULLISH ? math.max(low, gapLow) : math.min(high, gapHigh)
@@ -838,7 +840,7 @@ maintainFairValueGaps(array<fairValueGap> gaps, bool deleteMitigated) =>
                         eachFairValueGap.deepestWick := na(eachFairValueGap.deepestWick) ? pen : (eachFairValueGap.bias == BULLISH ? math.min(eachFairValueGap.deepestWick, pen) : math.max(eachFairValueGap.deepestWick, pen))
                         float cTop = eachFairValueGap.bias == BULLISH ? gapHigh : eachFairValueGap.deepestWick
                         float cBot = eachFairValueGap.bias == BULLISH ? eachFairValueGap.deepestWick : gapLow
-                        color cCol = color.new(eachFairValueGap.baseColor, fvgLiquidityTranspInput)
+                        color cCol = color.new(eachFairValueGap.baseColor, liquidityTransp)
                         if na(eachFairValueGap.consumedBox)
                             eachFairValueGap.consumedBox := box.new(chart.point.new(eachFairValueGap.topBox.get_left(), na, cTop), chart.point.new(time, na, cBot), xloc = xloc.bar_time, border_color = color.new(cCol, 100), bgcolor = cCol)
                         else
@@ -1162,10 +1164,10 @@ if showHighLowSwingsInput or showPremiumDiscountZonesInput
         drawPremiumDiscountZones(pdUseHtf, pdHtfTop, pdHtfBot, pdHtfTopTime, pdHtfBotTime)
 
 if fairValueGapsModeInput != FVG_OFF
-    maintainFairValueGaps(fairValueGaps, fairValueGapsDeleteInput)
+    maintainFairValueGaps(fairValueGaps, fairValueGapsDeleteInput, showFvgLiquidityInput, fvgLiquidityTranspInput)
     maintainBPRs(bprs, fairValueGapsDeleteInput)
 if fairValueGapsMode2Input != FVG_OFF
-    maintainFairValueGaps(fairValueGaps2, fairValueGapsDelete2Input)
+    maintainFairValueGaps(fairValueGaps2, fairValueGapsDelete2Input, showFvgLiquidity2Input, fvgLiquidityTransp2Input)
     maintainBPRs(bprs2, fairValueGapsDelete2Input)
 
 // Session High/Low levels (Asia / London / New York, SAST).
