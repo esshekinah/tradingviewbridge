@@ -44,7 +44,6 @@ showInternalsTooltip            = 'Display internal market structure'
 internalFilterConfluenceTooltip = 'Filter non significant internal structure breakouts'
 showStructureTooltip            = 'Display swing market Structure'
 showSwingsTooltip               = 'Display swing point as labels on the chart'
-showHighLowSwingsTooltip        = 'Highlight most recent strong and weak high/low points on the chart'
 
 modeInput                       = input.string( HISTORICAL, 'Mode',                     group = SMART_GROUP,    tooltip = modeTooltip, options = [HISTORICAL, PRESENT])
 styleInput                      = input.string( COLORED,    'Style',                    group = SMART_GROUP,    tooltip = styleTooltip,options = [COLORED, MONOCHROME])
@@ -66,7 +65,6 @@ swingBearColorInput             = input(        RED,        '',                 
 swingStructureSize              = input.string( SMALL,      'Swing Label Size',         group = SWING_GROUP,    options = [TINY,SMALL,NORMAL])
 showSwingsInput                 = input(        false,      'Show Swings Points',       group = SWING_GROUP,    tooltip = showSwingsTooltip,inline = 'swings')
 swingsLengthInput               = input.int(    50,         '',                         group = SWING_GROUP,    minval = 10,                inline = 'swings')
-showHighLowSwingsInput          = input(        true,       'Show Strong/Weak High/Low',group = SWING_GROUP,    tooltip = showHighLowSwingsTooltip)
 
 showStructFvgInput              = input.bool(   false,      'Show FVG in BOS/CHoCH',    group = STRUCT_FVG_GROUP, tooltip = 'On each internal BOS/CHoCH, highlight the LAST same-direction 3-candle FVG formed within the break leg (from the broken swing to the break bar). Detected fresh on the chart timeframe; extends right and freezes on full-fill wick mitigation.')
 structFvgBullColorInput         = input.color(color.new(#2962ff, 60), 'Bullish', group = STRUCT_FVG_GROUP, inline = 'sfvg')
@@ -371,7 +369,7 @@ getCurrentStructure(5,false,true)
 if showInternalsInput or showTrendInput or showStructFvgInput
     displayStructure(true)
 
-if showStructureInput or showHighLowSwingsInput
+if showStructureInput
     displayStructure()
 
 //---------------------------------------------------------------------------------------------------------------------}
