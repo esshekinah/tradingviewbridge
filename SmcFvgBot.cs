@@ -422,13 +422,33 @@ namespace cAlgo.Robots
         // =============================================================================
         private void DisplayStructure(bool isInternal)
         {
+            // Pine extraCondition:
+            //   internal ? internalHigh.currentLevel != swingHigh.currentLevel and bullishBar : true   (bull branch)
+            //   internal ? internalLow.currentLevel  != swingLow.currentLevel  and bearishBar : true   (bear branch)
+            // The confluence input (bullishBar/bearishBar) is NOT ported and defaults to
+            // true, so the only surviving gate is the pivot-level inequality on INTERNAL
+            // breaks: an internal break (and its order) is suppressed when the internal
+            // pivot level exactly equals the corresponding swing pivot level. Swing
+            // breaks keep extraCondition = true. In Pine this gate sits on the whole
+            // `if` block (before bullMakeFvg / order placement), so we place it on the
+            // internal-branch guard here, suppressing the crossed flip, trend flip, FVG
+            // scan and order alike. See smc_fvg_strategy.pine lines 485/488, 516/519.
+
             // ----- BULLISH break: crossover(close, high pivot) -----
             Pivot pHigh = isInternal ? _internalHigh : _swingHigh;
             int trendBias = isInternal ? _internalTrendBias : _swingTrendBias;
 
+            // Pine `a != na` evaluates to `na` (falsy), so when the swing pivot is unset
+            // (NaN) the internal extraCondition is falsy and suppresses the break. We
+            // reproduce that: require the swing level to be a real number AND differ.
+            bool bullExtraCondition = !isInternal
+                || (!double.IsNaN(_swingHigh.CurrentLevel)
+                    && pHigh.CurrentLevel != _swingHigh.CurrentLevel);
+
             if (!double.IsNaN(pHigh.CurrentLevel)
                 && Crossover(pHigh.CurrentLevel)
-                && !pHigh.Crossed)
+                && !pHigh.Crossed
+                && bullExtraCondition)
             {
                 // tag only affects Pine's (dropped) drawing; retained for clarity/parity.
                 // bool isChoch = trendBias == BEARISH;
@@ -451,9 +471,15 @@ namespace cAlgo.Robots
             Pivot pLow = isInternal ? _internalLow : _swingLow;
             trendBias = isInternal ? _internalTrendBias : _swingTrendBias;
 
+            // Same Pine `a != na` -> falsy handling as the bull branch above.
+            bool bearExtraCondition = !isInternal
+                || (!double.IsNaN(_swingLow.CurrentLevel)
+                    && pLow.CurrentLevel != _swingLow.CurrentLevel);
+
             if (!double.IsNaN(pLow.CurrentLevel)
                 && Crossunder(pLow.CurrentLevel)
-                && !pLow.Crossed)
+                && !pLow.Crossed
+                && bearExtraCondition)
             {
                 // bool isChoch = trendBias == BULLISH;
 
@@ -562,8 +588,15 @@ namespace cAlgo.Robots
                 return;
 
             // ----- SL / TP in PIPS -----
-            double slPips = StopLossPips;
-            double tpPips = TakeProfitMode == TpMode.RRR ? Rrr * StopLossPips : TakeProfitPips;
+            // Guard (review issue #4): the parameters retain Pine's `minval 0`, but in
+            // cAlgo a 0-pip distance is a real 0-distance stop/target (which would close
+            // the trade instantly), NOT "no stop/target". A 0 (or negative) value is
+            // therefore mapped to null = disabled, matching Pine's intent where 0 means
+            // "off". The order overloads take nullable double? for SL/TP pips.
+            double rawSl = StopLossPips;
+            double rawTp = TakeProfitMode == TpMode.RRR ? Rrr * StopLossPips : TakeProfitPips;
+            double? slPips = rawSl > 0 ? rawSl : (double?)null;
+            double? tpPips = rawTp > 0 ? rawTp : (double?)null;
 
             TradeType tradeType = isBull ? TradeType.Buy : TradeType.Sell;
             string label = BotLabelPrefix + (++_orderCounter);
@@ -612,6 +645,21 @@ namespace cAlgo.Robots
         // expressed in PIPS. Shown: Win Rate, Total Net Pips, Max Losing Streak, Max
         // Winning Streak, Total RRR. All in a single multi-line string, top-right.
         // (No table, no background fill, no projection - per user instruction.)
+        //
+        // DELIBERATE REINTERPRETATIONS (review issues #2 and #3, confirmed intentional):
+        //   * UNIT (issue #2): Pine's "Total Points" sums raw-price (exit-entry)*sign.
+        //     This port reports Total Net Pips = sum(HistoricalTrade.Pips) instead. The
+        //     dashboard stats are intentionally expressed in PIPS via cAlgo's History
+        //     (HistoricalTrade.Pips / .NetProfit), which is the broker-normalized unit;
+        //     the label ("Total Net Pips") reflects the change. NOT reverted to raw price.
+        //   * CLASSIFICATION (issue #3): win/loss for the streaks (and Win Rate) is keyed
+        //     off HistoricalTrade.NetProfit sign (money, incl. commission/swap), matching
+        //     Pine's closedtrades.profit basis; the pip magnitudes (Total Net Pips, and the
+        //     won/lost sums behind Total RRR) come from HistoricalTrade.Pips. A trade with
+        //     positive pips but negative net (fees) therefore counts as a loss for streaks
+        //     yet still adds its positive pips to the net-pips total. This split (NetProfit
+        //     for sign, Pips for magnitude) is intentional per the orchestrator's PIPS +
+        //     History requirement, NOT a bug.
         // =============================================================================
         private void UpdateDashboard()
         {
