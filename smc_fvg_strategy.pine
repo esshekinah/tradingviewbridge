@@ -34,6 +34,7 @@ SWING_GROUP                     = 'Real Time Swing Structure'
 STRUCT_FVG_GROUP                = 'FVG in BOS/CHoCH'
 STRATEGY_GROUP                  = 'Strategy'
 PROJECTION_GROUP                = 'Trade Projection'
+DASHBOARD_GROUP                 = 'Dashboard'
 
 STRUCT_FVG_INTERNAL             = 'Internal'
 STRUCT_FVG_SWING                = 'Swing'
@@ -44,6 +45,16 @@ FIB_025                         = '0.25'
 FIB_05                          = '0.5'
 FIB_075                         = '0.75'
 FIB_1                           = '1'
+
+DASH_TOP_LEFT                   = 'Top Left'
+DASH_TOP_CENTER                 = 'Top Center'
+DASH_TOP_RIGHT                  = 'Top Right'
+DASH_MID_LEFT                   = 'Middle Left'
+DASH_MID_CENTER                 = 'Middle Center'
+DASH_MID_RIGHT                  = 'Middle Right'
+DASH_BOT_LEFT                   = 'Bottom Left'
+DASH_BOT_CENTER                 = 'Bottom Center'
+DASH_BOT_RIGHT                  = 'Bottom Right'
 
 modeTooltip                     = 'Allows to display historical Structure or only the recent ones'
 styleTooltip                    = 'Indicator color theme'
@@ -91,6 +102,11 @@ tpZoneColorInput                = input.color(color.new(#2962ff, 80), 'TP Zone',
 slZoneColorInput                = input.color(color.new(#9c27b0, 80), 'SL Zone',        group = PROJECTION_GROUP, inline = 'proj')
 entryLineColorInput             = input.color(color.new(#787b86, 0),  'Entry Line',     group = PROJECTION_GROUP)
 projectionWidthInput            = input.int(    30,         'Projection Width (bars)',  group = PROJECTION_GROUP, minval = 1)
+
+showDashboardInput              = input.bool(   true,       'Show Dashboard',           group = DASHBOARD_GROUP, tooltip = 'Show a mini stats table with win rate, net points won, max losing streak and max winning streak.')
+dashboardPositionInput          = input.string( DASH_TOP_RIGHT, 'Position',             group = DASHBOARD_GROUP, options = [DASH_TOP_LEFT, DASH_TOP_CENTER, DASH_TOP_RIGHT, DASH_MID_LEFT, DASH_MID_CENTER, DASH_MID_RIGHT, DASH_BOT_LEFT, DASH_BOT_CENTER, DASH_BOT_RIGHT])
+dashboardBgColorInput           = input.color(color.new(#1e222d, 0),  'Background',     group = DASHBOARD_GROUP, inline = 'dashcol')
+dashboardTextColorInput         = input.color(color.new(#d1d4dc, 0),  'Text',           group = DASHBOARD_GROUP, inline = 'dashcol')
 
 //---------------------------------------------------------------------------------------------------------------------}
 //TYPES
@@ -174,6 +190,20 @@ var trend internalTrend             = trend.new(0)
 var array<structFvg> structFvgs     = array.new<structFvg>()
 // @variable                        storage for placed strategy orders and their projections
 var array<tradeOrder> tradeOrders   = array.new<tradeOrder>()
+// @variable                        running NET points won across all closed trades (raw price units)
+var float totalPointsWon            = 0.0
+// @variable                        count of closed trades already folded into the dashboard stats
+var int lastProcessedClosed         = 0
+// @variable                        current consecutive winning streak
+var int curWinStreak                = 0
+// @variable                        current consecutive losing streak
+var int curLossStreak               = 0
+// @variable                        largest winning streak observed
+var int maxWinStreak                = 0
+// @variable                        largest losing streak observed
+var int maxLossStreak               = 0
+// @variable                        the mini stats dashboard table (created once)
+var table dashTable                 = na
 // @variable                        color for swing bullish structures
 var swingBullishColor               = styleInput == MONOCHROME ? MONO_BULLISH : swingBullColorInput
 // @variable                        color for swing bearish structures
@@ -511,6 +541,67 @@ if showInternalsInput or showTrendInput or showStructFvgInput
 
 if showStructureInput
     displayStructure()
+
+//---------------------------------------------------------------------------------------------------------------------}
+//DASHBOARD STATS & RENDER
+//---------------------------------------------------------------------------------------------------------------------{
+// Fold only the NEWLY closed trades into the running stats (net points + streaks).
+// Done at GLOBAL scope so the `:=` updates on the global vars are legal (never inside
+// a function). strategy.closedtrades.*(i) is indexed 0 = oldest closed trade, so
+// iterating lastProcessedClosed..closedtrades-1 walks the new closes in chronological
+// order, keeping the streak tracking correct.
+if strategy.closedtrades > lastProcessedClosed
+    for i = lastProcessedClosed to strategy.closedtrades - 1
+        // NET points for this trade in raw price units: (exit - entry) * sign(size).
+        // size is positive for longs and negative for shorts, so a favourable move
+        // yields a positive contribution for either direction.
+        float pts = (strategy.closedtrades.exit_price(i) - strategy.closedtrades.entry_price(i)) * math.sign(strategy.closedtrades.size(i))
+        totalPointsWon := totalPointsWon + pts
+
+        float p = strategy.closedtrades.profit(i)
+        if p > 0
+            curWinStreak  := curWinStreak + 1
+            curLossStreak := 0
+            maxWinStreak  := math.max(maxWinStreak, curWinStreak)
+        else if p < 0
+            curLossStreak := curLossStreak + 1
+            curWinStreak  := 0
+            maxLossStreak := math.max(maxLossStreak, curLossStreak)
+        // p == 0 (break-even) is ignored for streak purposes
+    lastProcessedClosed := strategy.closedtrades
+
+// Map the position input to the matching position.* const.
+dashPosition = dashboardPositionInput == DASH_TOP_LEFT ? position.top_left : dashboardPositionInput == DASH_TOP_CENTER ? position.top_center : dashboardPositionInput == DASH_TOP_RIGHT ? position.top_right : dashboardPositionInput == DASH_MID_LEFT ? position.middle_left : dashboardPositionInput == DASH_MID_CENTER ? position.middle_center : dashboardPositionInput == DASH_MID_RIGHT ? position.middle_right : dashboardPositionInput == DASH_BOT_LEFT ? position.bottom_left : dashboardPositionInput == DASH_BOT_CENTER ? position.bottom_center : position.bottom_right
+
+// Create the table once, then only update its cells on the last bar so we never
+// rebuild a table every bar. Rows: header, Win Rate, Total Points, Max Losing Streak
+// (middle), Max Winning Streak.
+if showDashboardInput and barstate.islast
+    if na(dashTable)
+        dashTable := table.new(position = dashPosition, columns = 2, rows = 5, border_width = 1)
+    // Header sits at full opacity; the stat rows get a touch of transparency so the
+    // title band reads as a distinct header without needing a second color input.
+    color headerBg = color.new(dashboardBgColorInput, 0)
+    color rowBg    = color.new(dashboardBgColorInput, 20)
+    // Use a float ratio so the win rate is a true percentage, not an integer-truncated
+    // 0 (guard already ensures closedtrades > 0 here).
+    float winRate = strategy.wintrades / (strategy.closedtrades * 1.0) * 100
+    string winRateStr = strategy.closedtrades > 0 ? str.tostring(winRate, '#.##') + '%' : 'n/a'
+
+    table.cell(dashTable, 0, 0, 'SMC FVG Stats', text_color = dashboardTextColorInput, bgcolor = headerBg, text_size = size.normal)
+    table.cell(dashTable, 1, 0, '', text_color = dashboardTextColorInput, bgcolor = headerBg, text_size = size.normal)
+
+    table.cell(dashTable, 0, 1, 'Win Rate', text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+    table.cell(dashTable, 1, 1, winRateStr, text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+
+    table.cell(dashTable, 0, 2, 'Total Points', text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+    table.cell(dashTable, 1, 2, str.tostring(totalPointsWon, '#.##'), text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+
+    table.cell(dashTable, 0, 3, 'Max Losing Streak', text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+    table.cell(dashTable, 1, 3, str.tostring(maxLossStreak), text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+
+    table.cell(dashTable, 0, 4, 'Max Winning Streak', text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
+    table.cell(dashTable, 1, 4, str.tostring(maxWinStreak), text_color = dashboardTextColorInput, bgcolor = rowBg, text_size = size.small)
 
 //---------------------------------------------------------------------------------------------------------------------}
 //ALERTS
