@@ -1,0 +1,18 @@
+{
+  "project_type": "cTrader Automate (cAlgo) C# cBot - single-file trading robot (SmcFvgBot) porting the SMC-FVG Pine strategy. Repo also contains several .pine TradingView scripts (not in scope).",
+  "language": "C# (cAlgo.API for cTrader Automate)",
+  "build_system": "cTrader Automate (cAlgo). Built/compiled INSIDE the cTrader desktop app against its bundled cAlgo.API assemblies. No dotnet/nuget/msbuild project files in repo.",
+  "test_framework": "None. No unit tests exist. Verification is manual: user compiles and runs inside cTrader Automate.",
+  "build_command": "N/A in sandbox. cAlgo.API assemblies are NOT available here; `dotnet build`/`nuget restore` against cAlgo WILL fail. Build happens inside cTrader Automate on the user's machine.",
+  "test_command": "N/A. No automated tests. User verifies by compiling + backtesting in cTrader.",
+  "verification_instructions": "Static verification only in sandbox: (1) careful C#/cAlgo API self-review of SmcFvgBot.cs; (2) confirm the file still parses as valid C# by reasoning (no compiler available); (3) confirm additive behavior: with SL Mode=Pips and TP Mode=Pips/RRR the code path is byte-for-byte behaviorally identical to before. Real compile/run happens in cTrader Automate by the user.",
+  "snapshot_or_generated_files": "None.",
+  "setup_instructions": "None required in sandbox. To edit: work on branch feat/ctrader-dollar-sltp, edit SmcFvgBot.cs at repo root only.",
+  "environment_constraints": "INTEGRATIONS_ONLY-style: cAlgo.API assemblies unavailable; C# cannot be compiled or run in this sandbox. Cannot push or open PRs (orchestrator handles publish/merge). Deliverable = committed work on branch feat/ctrader-dollar-sltp.",
+  "contribution_requirements": "Edit ONLY SmcFvgBot.cs at repo root. Do NOT modify any .pine files. Keep cAlgo idioms and existing code conventions/comment style.",
+  "key_patterns": "Bot is a Robot subclass. Parameters via [Parameter(...)] attributes grouped by Group=\"Risk\"/\"Entry\"/\"Structure\"/\"Dashboard\". Enums declared at namespace scope and used as [Parameter] types (FvgSource, EntryMode, EntryFib, TpMode). Own orders/positions/history filtered by label prefix BotLabelPrefix = \"SmcFvg_\". Orders placed in PlaceStrategyOrder via ExecuteMarketOrder(TradeType, SymbolName, volume, label, slPips, tpPips) or PlaceLimitOrder(TradeType, SymbolName, volume, targetPrice, label, slPips, tpPips) with nullable double? SL/TP pips (<=0 mapped to null). Lifecycle: OnStart inits state, OnBar runs detection+entry on Last(1), OnStop removes dashboard. Currently NO OnTick.",
+  "relevant_files": [
+    "SmcFvgBot.cs (the ONLY file to edit; ~733 lines) - see enum TpMode (currently {Points, RRR}), PlaceStrategyOrder (SL/TP pip computation ~lines 590-640), OnStart/OnBar/OnStop lifecycle, [Parameter] Risk group, BotLabelPrefix filtering."
+  ],
+  "directory_structure": "Repo root: SmcFvgBot.cs (target), README.md, several *.pine scripts (out of scope). .agents/tasks holds prior task plans."
+}

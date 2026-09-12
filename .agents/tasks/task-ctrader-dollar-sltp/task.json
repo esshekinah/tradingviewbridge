@@ -1,0 +1,7 @@
+{
+  "task_id": "task-ctrader-dollar-sltp",
+  "task_description": "Add a dollar (account/deposit currency, Position.NetProfit) based SL/TP mode to the cTrader SmcFvgBot alongside the existing pip/broker path. SL Mode = Pips|Dollar; TP Mode = Pips|RRR|Dollar; RRR uses whichever SL unit is active (Rrr*StopLossPips broker TP when SL=Pips, or Rrr*StopLossDollars monitored threshold when SL=Dollar). Dollar dimensions are monitored per own position individually on OnTick and closed when net P&L crosses the threshold; pip dimensions stay broker-managed. Purely additive; pip-only mode reproduces current behavior. Edit SmcFvgBot.cs only. Cannot compile in sandbox.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
