@@ -195,6 +195,22 @@ namespace cAlgo.Robots
         [Parameter("Take Profit ($)", DefaultValue = 30, MinValue = 0, Group = "Risk")]
         public double TakeProfitDollars { get; set; }
 
+        // BASKET take-profit toggle. When enabled, OnTick sums Position.NetProfit across
+        // ALL of this bot's own open positions and, when the combined net reaches
+        // BasketTakeProfitDollars, closes EVERY own position at once. This is independent
+        // of the per-position dollar SL/TP above and runs regardless of SL Mode / TP Mode
+        // (including pip-only mode). Pending limit orders are left untouched. Default off,
+        // so the bot behaves exactly as before unless the user enables it.
+        [Parameter("Use Basket TP", DefaultValue = false, Group = "Risk")]
+        public bool UseBasketTp { get; set; }
+
+        // Basket take-profit target in the account/deposit currency (usually USD),
+        // compared against the SUM of Position.NetProfit (net incl. commission + swap)
+        // over the bot's own open positions. Used only when Use Basket TP = true.
+        // MinValue 0; a value <= 0 disables the basket check.
+        [Parameter("Basket Take Profit ($)", DefaultValue = 100, MinValue = 0, Group = "Risk")]
+        public double BasketTakeProfitDollars { get; set; }
+
         // Pine: rrrInput (default 3, minval 0). Used only when TP Mode = RRR. Multiplies
         // StopLossPips (broker TP, when SL Mode = Pips) or StopLossDollars (dollar target
         // monitored in OnTick, when SL Mode = Dollar).
@@ -352,6 +368,16 @@ namespace cAlgo.Robots
                         + "take-profit check is disabled and no broker target is attached.");
                 }
             }
+
+            // Basket TP enabled but the target resolves to <= 0 disables the basket check
+            // (guarded by BasketTakeProfitDollars > 0 in OnTick). Surface it so the gap is
+            // visible; this warning never changes behavior.
+            if (UseBasketTp && BasketTakeProfitDollars <= 0)
+            {
+                Print("WARNING: Use Basket TP is enabled but Basket Take Profit ($) <= 0. "
+                    + "The basket take-profit check is disabled. Set Basket Take Profit ($) "
+                    + "> 0 to enable it, or turn off Use Basket TP.");
+            }
         }
 
         // OnBar fires at the OPEN of a new bar => the just-closed bar is Last(1).
@@ -411,6 +437,35 @@ namespace cAlgo.Robots
         //     dollar dimension silently off (review issue #3).
         protected override void OnTick()
         {
+            // ----- BASKET take-profit -----
+            // Independent of the per-position dollar SL/TP below. It must run even in
+            // pip-only mode, so it is placed BEFORE the "no dollar dimension active"
+            // early-return. When the COMBINED net P&L of all the bot's own open positions
+            // reaches BasketTakeProfitDollars, close EVERY own position. Pending limit
+            // orders are LEFT ALONE; the bot keeps detecting setups and placing orders.
+            if (UseBasketTp && BasketTakeProfitDollars > 0)
+            {
+                // Snapshot of THIS bot's own open positions (by label prefix). Iterating
+                // this materialized list means closing during the loop does not mutate the
+                // live Positions collection being enumerated.
+                var own = Positions
+                    .Where(p => p.Label != null && p.Label.StartsWith(BotLabelPrefix))
+                    .ToList();
+
+                if (own.Count > 0)
+                {
+                    // Basket net = sum of net P&L (already incl. commission + swap) in the
+                    // account/deposit currency across the bot's own open positions.
+                    double basketNet = own.Sum(p => p.NetProfit);
+                    if (basketNet >= BasketTakeProfitDollars)
+                    {
+                        foreach (var position in own)
+                            position.Close(); // alternative: ClosePosition(position);
+                        return; // basket closed everything this tick; skip per-position loop.
+                    }
+                }
+            }
+
             // Nothing to monitor unless at least one dollar dimension is active.
             bool dollarSl = SlMode == RiskUnit.Dollar;
             bool dollarTp = TakeProfitMode == TpMode.Dollar
