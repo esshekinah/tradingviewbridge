@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Replace the per-order on-chart projection (TP-zone box, SL-zone box, dotted entry line) in smc_fvg_strategy.pine with a single arrow line per trade drawn once the trade CLOSES, from entry point to exit point, colored green when the trade won (TP) and red when it lost (SL). Arrows are kept permanently.",
+  "status": "completed",
+  "steps": [
+    "Repurpose the PROJECTION_GROUP inputs into a Trade Arrows group: keep a show toggle (showArrowInput, default true), add tpArrowColorInput (green #089981) and slArrowColorInput (red #F23645). Remove tpZoneColorInput, slZoneColorInput, entryLineColorInput, projectionWidthInput.",
+    "Update the tradeOrder UDT: drop tpBox/slBox/entryLine fields; keep id, entry, sl, tp, isLong, filled.",
+    "Remove projection drawing from placeStrategyOrder; update the tradeOrder.push call.",
+    "Add a drawTradeArrow helper (line shaft + arrowhead label) defined before pruneTradeOrders.",
+    "In pruneTradeOrders, on close detection, look up the closed-trade record via index and draw the arrow (if showArrowInput) before removing the tracking entry, guaranteeing draw-once."
+  ],
+  "acceptance_criteria": [
+    "No tpBox/slBox/entryLine drawing remains; projection-specific inputs removed.",
+    "tradeOrder UDT no longer has box/line fields.",
+    "Arrow drawn once per closed trade from (entry_bar_index, entry_price) to (exit_bar_index, exit_price), green if profit>0 else red.",
+    "Arrowhead rendered at the exit end.",
+    "Arrows never deleted (permanent). No illegal global mutation inside functions. Void functions end with trailing true.",
+    "All other strategy behavior unchanged."
+  ],
+  "verification": [
+    "Static self-review only (no local Pine compiler).",
+    "git diff --name-only shows only smc_fvg_strategy.pine (plus .agents task files) changed."
+  ],
+  "blocked_reason": null,
+  "findings": "Replaced per-order projection (tpBox/slBox/dotted entryLine) in smc_fvg_strategy.pine with a single entry->exit outcome arrow drawn once each trade closes. INPUTS: renamed PROJECTION_GROUP const to ARROW_GROUP = 'Trade Arrows'; replaced showProjectionInput->showArrowInput (bool, default true), removed tpZoneColorInput/slZoneColorInput/entryLineColorInput/projectionWidthInput, added tpArrowColorInput (#089981 green 'Win (TP)') and slArrowColorInput (#F23645 red 'Loss (SL)') inline='arrow'. UDT: tradeOrder dropped box tpBox/box slBox/line entryLine fields; now string id, float entry/sl/tp, bool isLong, bool filled=false. placeStrategyOrder: removed projection drawing block; push is now tradeOrder.new(id, entry, sl, tp, isBull). NEW HELPERS (defined before pruneTradeOrders, preserving def-before-use): closedTradeIndex(id) returns last matching strategy.closedtrades index or -1 (replaces old orderIsClosed which was removed); drawTradeArrow(k) draws line.new(entryBar, entryPrice, exitBar, exitPrice, xloc=xloc.bar_index, width=2) shaft + a label.new arrowhead at the exit end (label.style_arrowdown when exitPrice<entryPrice else style_arrowup), both colored by strategy.closedtrades.profit(k)>0 ? tpArrowColorInput : slArrowColorInput, guarded by showArrowInput and na-checks. pruneTradeOrders: on close (closedIdx>=0) it calls drawTradeArrow(closedIdx) then tradeOrders.remove(i) -> draw exactly once; arrows never deleted (permanent). ARROWHEAD CHOICE: line has no native arrowhead in Pine v5, so shaft = line + arrow-style label at exit end (chosen for legibility, matches reference image of a diagonal line pointing to the SL/TP exit). DRAW-ONCE confirmed (draw + remove in same step). PERMANENT-KEEP confirmed (no line/label .delete()). Updated max-count NOTE comment to reference lines/labels instead of boxes. strategy.closedtrades MEMBERS USED: entry_id, entry_price, exit_price, profit, size (already used pre-change) + entry_bar_index and exit_bar_index (NEW). entry_bar_index/exit_bar_index are standard Pine v5 strategy.closedtrades members; treated as confirmed but user should verify on TradingView compile. NO illegal global mutation inside functions (helpers only mutate locals / call drawing + array.remove). All void functions end with trailing true. ALL OTHER BEHAVIOR UNCHANGED: entries, SL/TP points/RRR, entry modes limit/market, fib entry, concurrent cap, dashboard, alerts untouched. Built-in strategy entry/exit triangles left as-is (automatic). VERIFICATION: static self-review only (no local Pine compiler per context.json); git diff --name-only = smc_fvg_strategy.pine only (plus .agents task files). User MUST re-paste smc_fvg_strategy.pine into TradingView to confirm it compiles."
+}
