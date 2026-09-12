@@ -12,6 +12,24 @@
 // Pips|Dollar and TP Mode is Pips|RRR|Dollar; dollar dimensions are enforced per
 // position in OnTick, pip dimensions are attached to the broker order.
 //
+// -------------------------------------------------------------------------------------
+// DOLLAR SL/TP TRADE-OFF (read before using SL/TP Mode = Dollar):
+//
+//   A DOLLAR dimension attaches NO broker stop/target. It is enforced ONLY by this bot
+//   from OnTick while the bot process is running and connected. This is by explicit user
+//   design ("if we select dollar we don't have to place sl" -> close on net P&L instead),
+//   so NO hidden broker safety-net stop is attached in dollar mode. The consequences the
+//   user must be aware of:
+//     * If the bot is stopped, crashes, or the platform disconnects while a position is
+//       open with SL Mode = Dollar, that position is UNPROTECTED on the downside until the
+//       bot resumes ticking. A broker pip stop would survive such an outage; a dollar stop
+//       does not.
+//     * In the Dollar-SL + Pips-TP mix the protection is ASYMMETRIC: the broker still holds
+//       the upside pip TP (it survives an outage), but the downside dollar SL depends on
+//       the bot being alive. This asymmetry is inherent to monitoring net P&L in-process
+//       and is intended, not a bug.
+//   If broker-guaranteed downside protection is required, use SL Mode = Pips instead.
+//
 // DELIBERATELY DROPPED (per explicit user instruction "dont add projection"):
 //   - The Pine version drew permanent TP-zone / SL-zone rectangles and a dotted entry
 //     line for every placed order, plus structure lines/labels and the FVG boxes.
@@ -139,6 +157,9 @@ namespace cAlgo.Robots
         // How the stop-loss is expressed/enforced: Pips = broker stop distance (server
         // managed); Dollar = net-P&L threshold monitored per-position in OnTick. Default
         // Pips preserves the pre-change broker-stop behavior.
+        // TRADE-OFF: a Dollar SL attaches NO broker stop and is only enforced while the bot
+        // is running (see the "DOLLAR SL/TP TRADE-OFF" note in the file header). If the bot
+        // stops/disconnects, a Dollar-SL position is unprotected on the downside.
         [Parameter("SL Mode", DefaultValue = RiskUnit.Pips, Group = "Risk")]
         public RiskUnit SlMode { get; set; }
 
@@ -297,6 +318,40 @@ namespace cAlgo.Robots
             _internalLegInit = false;
 
             _orderCounter = 0;
+
+            // ----- startup configuration warnings (review issue #3) -----
+            // These are WARNINGS ONLY; they never change the exit logic. Print(...) is the
+            // standard cAlgo Robot API logging call (writes to the cBot Log tab).
+            //
+            // A Dollar SL left at <= 0 means NO broker stop is attached (SL Mode != Pips)
+            // AND the OnTick dollar-SL check is skipped (guarded by StopLossDollars > 0), so
+            // the position has NO stop at all - silently. Surface it so the gap is visible.
+            if (SlMode == RiskUnit.Dollar && StopLossDollars <= 0)
+            {
+                Print("WARNING: SL Mode = Dollar but Stop Loss ($) <= 0. No broker stop is "
+                    + "attached and the dollar stop-loss check is disabled, so open "
+                    + "positions have NO stop-loss protection. Set Stop Loss ($) > 0 to "
+                    + "enable the dollar stop, or switch SL Mode to Pips for a broker stop.");
+            }
+
+            // A dollar take-profit target that resolves to <= 0 disables the OnTick TP
+            // check the same way. This covers TP Mode = Dollar with Take Profit ($) <= 0,
+            // and TP Mode = RRR off a Dollar SL where Rrr * StopLossDollars resolves to 0.
+            bool dollarTpAtStart = TakeProfitMode == TpMode.Dollar
+                || (TakeProfitMode == TpMode.RRR && SlMode == RiskUnit.Dollar);
+            if (dollarTpAtStart)
+            {
+                double tpTarget = TakeProfitMode == TpMode.Dollar
+                    ? TakeProfitDollars
+                    : Rrr * StopLossDollars;
+                if (tpTarget <= 0)
+                {
+                    Print("WARNING: the dollar take-profit target resolves to <= 0 "
+                        + "(TP Mode = Dollar with Take Profit ($) <= 0, or TP Mode = RRR "
+                        + "off a Dollar SL with Rrr * Stop Loss ($) <= 0). The dollar "
+                        + "take-profit check is disabled and no broker target is attached.");
+                }
+            }
         }
 
         // OnBar fires at the OPEN of a new bar => the just-closed bar is Last(1).
@@ -345,6 +400,15 @@ namespace cAlgo.Robots
         //     already-open position on the next tick.
         //   * A materialized snapshot (ToList) is iterated so closing a position does not
         //     mutate the collection being enumerated.
+        //   * PROCESS-LIVENESS DEPENDENCY (review issues #1/#2): because dollar dimensions
+        //     attach no broker stop, they are enforced ONLY here, i.e. only while the bot
+        //     is running. A stopped/disconnected bot leaves Dollar-SL positions unprotected
+        //     on the downside; in a Dollar-SL + Pips-TP mix the broker still holds the
+        //     upside TP but the downside relies on this method firing. This is intentional
+        //     per the user's design (no hidden broker stop). See the file-header trade-off
+        //     note. The <=0 threshold guards below (StopLossDollars > 0 / target > 0)
+        //     disable the respective check; OnStart prints a warning when that leaves a
+        //     dollar dimension silently off (review issue #3).
         protected override void OnTick()
         {
             // Nothing to monitor unless at least one dollar dimension is active.
