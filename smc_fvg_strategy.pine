@@ -1,5 +1,5 @@
 //@version=5
-strategy('SMC - FVG Strategy | Emmanuel', 'SMC - FVG Strat', overlay = true, pyramiding = 100, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500, default_qty_type = strategy.fixed, default_qty_value = 1, calc_on_every_tick = false)
+strategy('SMC - FVG Strategy | Emmanuel', 'SMC - FVG Strat', overlay = true, pyramiding = 100, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500, default_qty_type = strategy.fixed, default_qty_value = 1, calc_on_every_tick = false, show_trades = input.bool(false, 'Show TradingView Trade Markers', group = 'Trade Arrows', tooltip = 'Show or hide the built-in TradingView strategy entry and exit markers on the chart. Off by default to reduce clutter; the custom win and loss arrows are unaffected.'))
 //---------------------------------------------------------------------------------------------------------------------}
 //CONSTANTS & STRINGS & INPUTS
 //---------------------------------------------------------------------------------------------------------------------{
