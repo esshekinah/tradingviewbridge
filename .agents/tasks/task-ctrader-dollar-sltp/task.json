@@ -1,0 +1,23 @@
+{
+  "task_id": "task-ctrader-dollar-sltp",
+  "task_description": "Add a dollar (account/deposit currency, Position.NetProfit) based SL/TP mode to the cTrader SmcFvgBot alongside the existing pip/broker path. SL Mode = Pips|Dollar; TP Mode = Pips|RRR|Dollar; RRR uses whichever SL unit is active (Rrr*StopLossPips broker TP when SL=Pips, or Rrr*StopLossDollars monitored threshold when SL=Dollar). Dollar dimensions are monitored per own position individually on OnTick and closed when net P&L crosses the threshold; pip dimensions stay broker-managed. Purely additive; pip-only mode reproduces current behavior. Edit SmcFvgBot.cs only. Cannot compile in sandbox.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "skipped",
+    "tests": "skipped",
+    "test_quality": "skipped",
+    "docker_build": "skipped",
+    "summary": "No build/test possible in sandbox: cAlgo.API assemblies are unavailable so the C# cannot be compiled or run, and the repo has no test framework or build system. Verified statically: only SmcFvgBot.cs (plus task-state files) changed; TpMode expanded to {Pips,RRR,Dollar} with Points fully removed from code (only Pine-origin comments mention it); RiskUnit enum and SlMode/StopLossDollars/TakeProfitDollars parameters added to the Risk group; PlaceStrategyOrder computes broker SL and TP independently and passes null for dollar-monitored dimensions while preserving the <=0 -> null mapping; OnTick monitors only own positions by label prefix via Position.NetProfit and closes on the correct SL/TP conditions (RRR-with-dollar-SL target = Rrr*StopLossDollars) with an early return keeping pip-only mode behaviorally identical. User must compile/backtest in cTrader Automate."
+  },
+  "review": {
+    "passes": 2,
+    "final_verdict": "APPROVED",
+    "reviews": [
+      ".agents/tasks/task-ctrader-dollar-sltp/2026-09-12-084910-review.md",
+      ".agents/tasks/task-ctrader-dollar-sltp/2026-09-12-085319-review.md"
+    ],
+    "residual_note": "Only non-blocking residual is the cAlgo API surface (OnTick, Position.Close/NetProfit/Label, Positions, Print) that is confirmable only by compiling in cTrader Automate; no assemblies available in sandbox."
+  }
+}
