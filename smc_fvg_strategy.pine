@@ -33,7 +33,7 @@ INTERNAL_GROUP                  = 'Real Time Internal Structure'
 SWING_GROUP                     = 'Real Time Swing Structure'
 STRUCT_FVG_GROUP                = 'FVG in BOS/CHoCH'
 STRATEGY_GROUP                  = 'Strategy'
-PROJECTION_GROUP                = 'Trade Projection'
+ARROW_GROUP                     = 'Trade Arrows'
 DASHBOARD_GROUP                 = 'Dashboard'
 
 STRUCT_FVG_INTERNAL             = 'Internal'
@@ -106,11 +106,9 @@ orderQtyInput                   = input.float(  1,          'Order Size (contrac
 maxOrdersInput                  = input.int(    100,        'Max Concurrent Orders',    group = STRATEGY_GROUP,   minval = 1, maxval = 100)
 entryFibInput                   = input.string( FIB_0,      'Entry Fib Level',          group = STRATEGY_GROUP,   options = [FIB_0, FIB_025, FIB_05, FIB_075, FIB_1], tooltip = 'Where inside the FVG the limit entry sits, from the near (proximal) edge toward the far (distal) edge. 0 = near edge (current behavior), 0.25 = 25% in, 0.5 = midpoint (CE), 0.75 = 75% in, 1 = far (deepest fill) edge. For a long the near edge is the FVG top and deeper means a lower price; for a short the near edge is the FVG bottom and deeper means a higher price.')
 
-showProjectionInput             = input.bool(   true,       'Show Projection',          group = PROJECTION_GROUP)
-tpZoneColorInput                = input.color(color.new(#2962ff, 80), 'TP Zone',        group = PROJECTION_GROUP, inline = 'proj')
-slZoneColorInput                = input.color(color.new(#9c27b0, 80), 'SL Zone',        group = PROJECTION_GROUP, inline = 'proj')
-entryLineColorInput             = input.color(color.new(#787b86, 0),  'Entry Line',     group = PROJECTION_GROUP)
-projectionWidthInput            = input.int(    30,         'Projection Width (bars)',  group = PROJECTION_GROUP, minval = 1)
+showArrowInput                  = input.bool(   true,       'Show Trade Arrows',        group = ARROW_GROUP, tooltip = 'Draw a single arrow per trade once it CLOSES, from entry point to exit point. Green = trade won (TP), Red = trade lost (SL). Arrows are kept permanently.')
+tpArrowColorInput               = input.color(  #089981,    'Win (TP)',                 group = ARROW_GROUP, inline = 'arrow')
+slArrowColorInput               = input.color(  #F23645,    'Loss (SL)',                group = ARROW_GROUP, inline = 'arrow')
 
 showDashboardInput              = input.bool(   true,       'Show Dashboard',           group = DASHBOARD_GROUP, tooltip = 'Show a mini stats table with win rate, net points won, max losing streak and max winning streak.')
 dashboardPositionInput          = input.string( DASH_TOP_RIGHT, 'Position',             group = DASHBOARD_GROUP, options = [DASH_TOP_LEFT, DASH_TOP_CENTER, DASH_TOP_RIGHT, DASH_MID_LEFT, DASH_MID_CENTER, DASH_MID_RIGHT, DASH_BOT_LEFT, DASH_BOT_CENTER, DASH_BOT_RIGHT])
@@ -143,12 +141,10 @@ type structFvg
     box   bx
     bool  frozen = false
 
-// @type                            UDT for a placed strategy order and its permanent projection
+// @type                            UDT for a placed strategy order (cap tracking only)
 // @field id                        unique entry id used by strategy.entry/strategy.exit
 // @field entry/sl/tp               order price levels
 // @field isLong                    trade direction
-// @field tpBox/slBox               projection zone boxes (never deleted)
-// @field entryLine                 dotted horizontal entry line (never deleted)
 // @field filled                    set true once the order's position opens; used by
 //                                  pruneTradeOrders to detect a subsequent close and free a cap slot
 type tradeOrder
@@ -157,9 +153,6 @@ type tradeOrder
     float  sl
     float  tp
     bool   isLong
-    box    tpBox
-    box    slBox
-    line   entryLine
     bool   filled = false
 
 // @type                            UDT representing trend bias
@@ -370,9 +363,9 @@ maintainStructFvgs() =>
     true
 
 // @function            place a pending LIMIT order inside an FVG at the selected fib level,
-//                      with SL/TP in points, and draw a permanent split-rectangle projection
-//                      (TP zone + SL zone + entry line). Guarded by the concurrent-order cap;
-//                      projections are NEVER deleted.
+//                      with SL/TP in points. Guarded by the concurrent-order cap. The on-chart
+//                      outcome arrow (entry->exit) is drawn later, once the trade closes, by
+//                      pruneTradeOrders - not here.
 // @param isBull        true for a long (bullish FVG), false for a short (bearish FVG)
 // @param nearEdge      proximal edge price (fib 0)
 // @param farEdge       distal edge price (fib 1); entry = nearEdge + fib*(farEdge - nearEdge)
@@ -401,16 +394,7 @@ placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
             strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput, limit = entry)
         strategy.exit(id + '_x', from_entry = id, stop = sl, limit = tp)
 
-        box tpBox = na
-        box slBox = na
-        line entryLine = na
-        if showProjectionInput
-            int rightBar = bar_index + projectionWidthInput
-            tpBox     := box.new(bar_index, math.max(entry, tp), rightBar, math.min(entry, tp), xloc = xloc.bar_index, border_color = color.new(tpZoneColorInput, 0), bgcolor = tpZoneColorInput)
-            slBox     := box.new(bar_index, math.max(entry, sl), rightBar, math.min(entry, sl), xloc = xloc.bar_index, border_color = color.new(slZoneColorInput, 0), bgcolor = slZoneColorInput)
-            entryLine := line.new(bar_index, entry, rightBar, entry, xloc = xloc.bar_index, color = entryLineColorInput, style = line.style_dotted)
-
-        tradeOrders.push(tradeOrder.new(id, entry, sl, tp, isBull, tpBox, slBox, entryLine))
+        tradeOrders.push(tradeOrder.new(id, entry, sl, tp, isBull))
     true
 
 // @function            true if the given entry id currently has an open position
@@ -424,40 +408,70 @@ orderIsOpen(string id) =>
                 found := true
     found
 
-// @function            true if the given entry id appears among the closed trades
+// @function            index of the closed-trade record matching the given entry id, or -1.
+//                      Returns the last match so a re-used id resolves to its latest close.
 // @param id            the strategy.entry id to look up
-// @returns             bool
-orderIsClosed(string id) =>
-    bool found = false
+// @returns             int (closed-trade index, or -1 if not closed)
+closedTradeIndex(string id) =>
+    int idx = -1
     if strategy.closedtrades > 0
         for k = 0 to strategy.closedtrades - 1
             if strategy.closedtrades.entry_id(k) == id
-                found := true
-    found
+                idx := k
+    idx
 
-// @function            keep the concurrent-order cap honest: mark orders filled once their
-//                      position opens, then drop entries whose trade has since closed so the
-//                      cap counts only LIVE (pending + open) orders. Closes are detected via
-//                      BOTH the open->close transition AND direct closed-trade lookup, so a
-//                      limit that fills and hits SL/TP within the SAME bar (never observed
-//                      open by this once-per-confirmed-bar prune) still frees its slot.
-//                      Projections are NEVER deleted here - only the cap-tracking array entry
-//                      is removed, the box/line drawings persist on the chart.
-// NOTE: because the cap is concurrent (not lifetime) and projections are never deleted,
-//       a very long session with many closed trades can accumulate boxes/lines past
-//       max_boxes_count/max_lines_count=500, after which Pine silently drops the oldest.
-//       Accepted per the user's request that projections stay drawn permanently.
+// @function            draw a permanent outcome arrow for a closed trade: a straight shaft
+//                      from the entry point to the exit point plus an arrowhead label at the
+//                      exit end. Color is green when the trade won (profit > 0) and red when
+//                      it lost. Uses xloc.bar_index so the shaft is a clean diagonal.
+//                      Arrowhead approach: Pine `line` has no native arrowhead, so we draw the
+//                      shaft with line.new(...) and place a label.new(...) at the exit end using
+//                      an arrow-style label (style_arrowdown when the exit is below the entry,
+//                      style_arrowup when above) with matching color and no text. Arrows are
+//                      NEVER deleted (kept permanently per the user's request).
+// @param k             closed-trade index (from closedTradeIndex)
+// @returns             void
+drawTradeArrow(int k) =>
+    if showArrowInput and k >= 0
+        int   entryBar   = strategy.closedtrades.entry_bar_index(k)
+        float entryPrice = strategy.closedtrades.entry_price(k)
+        int   exitBar    = strategy.closedtrades.exit_bar_index(k)
+        float exitPrice  = strategy.closedtrades.exit_price(k)
+        // Realized profit sign decides the color: > 0 => win (green TP), else loss (red SL).
+        color arrowColor = strategy.closedtrades.profit(k) > 0 ? tpArrowColorInput : slArrowColorInput
+        if not na(entryBar) and not na(exitBar) and not na(entryPrice) and not na(exitPrice)
+            line.new(entryBar, entryPrice, exitBar, exitPrice, xloc = xloc.bar_index, color = arrowColor, width = 2)
+            // Arrowhead at the exit end: point down when the trade resolved below entry,
+            // up when it resolved above entry. No text, same color as the shaft.
+            string headStyle = exitPrice < entryPrice ? label.style_arrowdown : label.style_arrowup
+            label.new(exitBar, exitPrice, '', xloc = xloc.bar_index, color = arrowColor, textcolor = arrowColor, style = headStyle, size = size.small)
+    true
+
+// @function            keep the concurrent-order cap honest AND draw the outcome arrow once
+//                      a trade closes. Marks orders filled once their position opens, then
+//                      when an entry's trade has closed it (a) looks up the closed-trade
+//                      record, (b) draws the entry->exit arrow (green win / red loss), and
+//                      (c) removes the entry from the cap-tracking array. Drawing in the same
+//                      step the entry is removed guarantees the arrow is drawn exactly ONCE.
+//                      Closes are detected via direct closed-trade lookup, so a limit that
+//                      fills and hits SL/TP within the SAME bar (never observed open by this
+//                      once-per-confirmed-bar prune) still draws its arrow and frees its slot.
+//                      Arrows are NEVER deleted - only the cap-tracking array entry is removed;
+//                      the line/label drawings persist on the chart permanently.
+// NOTE: because arrows are kept permanently, a very long session with many closed trades can
+//       accumulate lines/labels past max_lines_count/max_labels_count=500, after which Pine
+//       silently drops the oldest. Accepted per the user's request that arrows stay drawn.
 // @returns             void
 pruneTradeOrders() =>
     if tradeOrders.size() > 0
         for i = tradeOrders.size() - 1 to 0
             tradeOrder t = tradeOrders.get(i)
+            int closedIdx = closedTradeIndex(t.id)
             bool isOpen = orderIsOpen(t.id)
-            bool isClosed = orderIsClosed(t.id)
-            if isClosed
+            if closedIdx >= 0
                 // trade has closed (covers same-bar fill+close, where the position was
-                // never observed open). No longer live => free the cap slot WITHOUT
-                // deleting the projection.
+                // never observed open). Draw the outcome arrow ONCE, then free the cap slot.
+                drawTradeArrow(closedIdx)
                 tradeOrders.remove(i)
             else if isOpen
                 // position is live: record the fill so we can detect its close later
