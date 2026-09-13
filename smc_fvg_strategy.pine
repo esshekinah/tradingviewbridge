@@ -144,7 +144,11 @@ type structFvg
 
 // @type                            UDT for a placed strategy order (cap tracking + live projection)
 // @field id                        unique entry id used by strategy.entry/strategy.exit
-// @field entry/sl/tp               order price levels
+// @field entry/sl/tp               order price levels (for the projection; refreshed from the
+//                                  real fill once the position opens so the zones match reality)
+// @field slDist/tpDist             SL/TP distance in price points from the entry; used to place
+//                                  the exit relative to the ACTUAL fill (loss/profit in ticks) and
+//                                  to recompute entry/sl/tp from the real fill for the projection
 // @field isLong                    trade direction
 // @field filled                    set true once the order's position opens; used by
 //                                  maintainTradeProjections to detect a subsequent close and free a cap slot
@@ -157,6 +161,8 @@ type tradeOrder
     float  sl
     float  tp
     bool   isLong
+    float  slDist   = na
+    float  tpDist   = na
     bool   filled = false
     box    tpBox     = na
     box    slBox     = na
@@ -401,9 +407,17 @@ placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
             strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput)
         else
             strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput, limit = entry)
-        strategy.exit(id + '_x', from_entry = id, stop = sl, limit = tp)
+        // Anchor SL/TP to the ACTUAL fill price rather than a predicted entry. strategy.exit
+        // loss/profit are DISTANCES in ticks (mintick increments) measured from each position's
+        // real average entry price, so Pine places the stop/limit correctly for both a market
+        // fill (next bar open, not this close) and a limit fill, and independently per concurrent
+        // position (from_entry binds the exit to its own entry). Convert our point distances
+        // (raw price units) to ticks via syminfo.mintick. slPointsInput/tpDist are >= 0.
+        float slTicks = slPointsInput / syminfo.mintick
+        float tpTicks = tpDist / syminfo.mintick
+        strategy.exit(id + '_x', from_entry = id, loss = slTicks, profit = tpTicks)
 
-        tradeOrders.push(tradeOrder.new(id, entry, sl, tp, isBull))
+        tradeOrders.push(tradeOrder.new(id, entry, sl, tp, isBull, slPointsInput, tpDist))
     true
 
 // @function            index of the OPEN-trade record matching the given entry id, or -1.
@@ -489,6 +503,14 @@ maintainTradeProjections() =>
                 int exitBar = strategy.closedtrades.exit_bar_index(closedIdx)
                 if not t.drawn
                     int entryBarC = strategy.closedtrades.entry_bar_index(closedIdx)
+                    // Same-bar fill+close: never seen open, so refresh entry/sl/tp from the real
+                    // fill here (mirrors the open-branch) so the frozen projection matches the
+                    // levels the exit used. Guarded on the stored distances.
+                    float fillC = strategy.closedtrades.entry_price(closedIdx)
+                    if not na(fillC) and not na(t.slDist) and not na(t.tpDist)
+                        t.entry := fillC
+                        t.sl    := t.isLong ? fillC - t.slDist : fillC + t.slDist
+                        t.tp    := t.isLong ? fillC + t.tpDist : fillC - t.tpDist
                     drawProjection(t, entryBarC, exitBar)
                 // Unconditionally clamp the right edge to the true exit bar whenever the
                 // projection exists. Not gated on t.frozen so a prior (over-extended) state is
@@ -505,6 +527,17 @@ maintainTradeProjections() =>
                 t.filled := true
                 if not t.drawn
                     int entryBarO = strategy.opentrades.entry_bar_index(openIdx)
+                    // Refresh the stored entry/sl/tp from the REAL fill before drawing so the
+                    // projection zones match the levels the exit actually uses. For a limit
+                    // entry the fill equals the stored limit price (no change); for a market
+                    // entry the true fill is next bar's open (not the confirmation close used
+                    // at submission), so this corrects the market-mode projection. Guarded on
+                    // the stored distances so a na never overwrites a valid level.
+                    float fill = strategy.opentrades.entry_price(openIdx)
+                    if not na(fill) and not na(t.slDist) and not na(t.tpDist)
+                        t.entry := fill
+                        t.sl    := t.isLong ? fill - t.slDist : fill + t.slDist
+                        t.tp    := t.isLong ? fill + t.tpDist : fill - t.tpDist
                     drawProjection(t, entryBarO, bar_index)
                 else if not t.frozen
                     t.tpBox.set_right(bar_index)
