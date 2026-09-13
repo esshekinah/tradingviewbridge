@@ -477,11 +477,23 @@ maintainTradeProjections() =>
                 // Trade has closed. Freeze the projection at the exit bar. If it was never
                 // drawn live (same-bar fill+close), draw it now straight from the closed-trade
                 // record so it still appears frozen. Then free the cap slot.
+                //
+                // Detection lag: with calc_on_every_tick=false the SL/TP is hit intrabar on the
+                // real exit bar, but the trade only surfaces in strategy.closedtrades when the
+                // script next evaluates this order. On every bar between the tap and that
+                // detection the open-branch below has been pushing the right edge forward to the
+                // then-current bar, so by now the boxes/line sit PAST the true exit bar. The
+                // freeze must therefore AUTHORITATIVELY pull the right edge back to exit_bar_index
+                // and must not be skipped once drawn - otherwise the projection is orphaned at the
+                // over-extended position (the bug: right edge landing beyond the SL/TP tap bar).
                 int exitBar = strategy.closedtrades.exit_bar_index(closedIdx)
                 if not t.drawn
                     int entryBarC = strategy.closedtrades.entry_bar_index(closedIdx)
                     drawProjection(t, entryBarC, exitBar)
-                if t.drawn and not t.frozen and not na(exitBar)
+                // Unconditionally clamp the right edge to the true exit bar whenever the
+                // projection exists. Not gated on t.frozen so a prior (over-extended) state is
+                // always corrected; guarded only against a na exit bar so we never write na.
+                if t.drawn and not na(exitBar)
                     t.tpBox.set_right(exitBar)
                     t.slBox.set_right(exitBar)
                     t.entryLine.set_x2(exitBar)
