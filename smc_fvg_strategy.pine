@@ -34,11 +34,15 @@ SWING_GROUP                     = 'Real Time Swing Structure'
 STRUCT_FVG_GROUP                = 'FVG in BOS/CHoCH'
 STRATEGY_GROUP                  = 'Strategy'
 PROJECTION_GROUP                = 'Trade Projection'
+VWAP_GROUP                      = 'VWAP Filter'
 DASHBOARD_GROUP                 = 'Dashboard'
 
 STRUCT_FVG_INTERNAL             = 'Internal'
 STRUCT_FVG_SWING                = 'Swing'
 STRUCT_FVG_BOTH                 = 'Both'
+
+VWAP_TREND                      = 'Trend'
+VWAP_REVERSION                  = 'Reversion'
 
 FIB_0                           = '0'
 FIB_025                         = '0.25'
@@ -110,6 +114,11 @@ showProjectionInput             = input.bool(   true,       'Show Trade Projecti
 tpZoneColorInput                = input.color(color.new(#2962ff, 80), 'TP Zone',        group = PROJECTION_GROUP, inline = 'proj')
 slZoneColorInput                = input.color(color.new(#9c27b0, 80), 'SL Zone',        group = PROJECTION_GROUP, inline = 'proj')
 entryLineColorInput             = input.color(  color.gray, 'Entry Line',               group = PROJECTION_GROUP, inline = 'proj')
+
+useVwapFilterInput              = input.bool(   false,      'Use VWAP Filter',          group = VWAP_GROUP,       tooltip = 'Only take trades aligned with VWAP. Trend: longs above / shorts below VWAP. Reversion: longs below / shorts above VWAP. Compared against the confirmation bar close. Off by default.')
+vwapModeInput                   = input.string( VWAP_TREND, 'Filter Mode',              group = VWAP_GROUP,       options = [VWAP_TREND, VWAP_REVERSION])
+showVwapInput                   = input.bool(   true,       'Show VWAP Line',           group = VWAP_GROUP)
+vwapColorInput                  = input.color(  #ff9800,    'VWAP Color',               group = VWAP_GROUP)
 
 showDashboardInput              = input.bool(   true,       'Show Dashboard',           group = DASHBOARD_GROUP, tooltip = 'Show a mini stats table with win rate, net points won, max losing streak and max winning streak.')
 dashboardPositionInput          = input.string( DASH_TOP_RIGHT, 'Position',             group = DASHBOARD_GROUP, options = [DASH_TOP_LEFT, DASH_TOP_CENTER, DASH_TOP_RIGHT, DASH_MID_LEFT, DASH_MID_CENTER, DASH_MID_RIGHT, DASH_BOT_LEFT, DASH_BOT_CENTER, DASH_BOT_RIGHT])
@@ -227,6 +236,10 @@ var swingBullishColor               = styleInput == MONOCHROME ? MONO_BULLISH : 
 var swingBearishColor               = styleInput == MONOCHROME ? MONO_BEARISH : swingBearColorInput
 // @variable                        alerts in current bar
 alerts currentAlerts                = alerts.new()
+// @variable                        session VWAP (TradingView default: hlc3 source, auto-resets each session/day).
+//                                  Computed UNCONDITIONALLY at global scope every bar so ta.vwap keeps a correct
+//                                  running series. Declared before displayStructure is called and before the plot.
+float vwapValue                     = ta.vwap(hlc3)
 
 //---------------------------------------------------------------------------------------------------------------------}
 //FUNCTIONS
@@ -372,6 +385,20 @@ maintainStructFvgs() =>
                 if mitigated
                     f.frozen := true
     true
+
+// @function            VWAP directional gate for longs. Reads the precomputed global vwapValue.
+//                      When the filter is off it always returns true (entries behave exactly as
+//                      today). na(vwapValue) during warmup ALSO returns true so no bar is silently
+//                      filtered. Trend: long allowed when close > VWAP. Reversion: close < VWAP.
+// @returns             bool
+vwapAllowsLong() =>
+    not useVwapFilterInput or na(vwapValue) or (vwapModeInput == VWAP_TREND ? close > vwapValue : close < vwapValue)
+
+// @function            VWAP directional gate for shorts. Mirror of vwapAllowsLong.
+//                      Trend: short allowed when close < VWAP. Reversion: close > VWAP.
+// @returns             bool
+vwapAllowsShort() =>
+    not useVwapFilterInput or na(vwapValue) or (vwapModeInput == VWAP_TREND ? close < vwapValue : close > vwapValue)
 
 // @function            place a pending LIMIT order inside an FVG at the selected fib level,
 //                      with SL/TP in points. Guarded by the concurrent-order cap. The on-chart
@@ -579,8 +606,10 @@ displayStructure(bool internal = false) =>
         if bullMakeFvg
             int fvgCountBefore = structFvgs.size()
             highlightStructFvg(p_ivot.barIndex, true)
-            // Place a long limit order only when a new FVG was actually highlighted.
-            if structFvgs.size() > fvgCountBefore
+            // Place a long limit order only when a new FVG was actually highlighted AND the
+            // VWAP directional filter allows longs. The FVG box highlight above is NOT gated -
+            // only the order placement is filtered.
+            if structFvgs.size() > fvgCountBefore and vwapAllowsLong()
                 structFvg f = structFvgs.last()
                 placeStrategyOrder(true, f.top, f.bottom)
 
@@ -610,8 +639,10 @@ displayStructure(bool internal = false) =>
         if bearMakeFvg
             int fvgCountBefore = structFvgs.size()
             highlightStructFvg(p_ivot.barIndex, false)
-            // Place a short limit order only when a new FVG was actually highlighted.
-            if structFvgs.size() > fvgCountBefore
+            // Place a short limit order only when a new FVG was actually highlighted AND the
+            // VWAP directional filter allows shorts. The FVG box highlight above is NOT gated -
+            // only the order placement is filtered.
+            if structFvgs.size() > fvgCountBefore and vwapAllowsShort()
                 structFvg f = structFvgs.last()
                 placeStrategyOrder(false, f.bottom, f.top)
 
@@ -626,6 +657,9 @@ displayStructure(bool internal = false) =>
 parsedOpen  = showTrendInput ? open : na
 candleColor = internalTrend.bias == BULLISH ? swingBullishColor : swingBearishColor
 plotcandle(parsedOpen,high,low,close,color = candleColor, wickcolor = candleColor, bordercolor = candleColor)
+
+// Session VWAP line (own show toggle + color). vwapValue is computed unconditionally above.
+plot(showVwapInput ? vwapValue : na, 'VWAP', color = vwapColorInput, linewidth = 1)
 
 if showStructFvgInput
     maintainStructFvgs()
