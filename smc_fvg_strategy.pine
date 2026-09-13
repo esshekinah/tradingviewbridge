@@ -33,7 +33,7 @@ INTERNAL_GROUP                  = 'Real Time Internal Structure'
 SWING_GROUP                     = 'Real Time Swing Structure'
 STRUCT_FVG_GROUP                = 'FVG in BOS/CHoCH'
 STRATEGY_GROUP                  = 'Strategy'
-ARROW_GROUP                     = 'Trade Arrows'
+PROJECTION_GROUP                = 'Trade Projection'
 DASHBOARD_GROUP                 = 'Dashboard'
 
 STRUCT_FVG_INTERNAL             = 'Internal'
@@ -106,9 +106,10 @@ orderQtyInput                   = input.float(  1,          'Order Size (contrac
 maxOrdersInput                  = input.int(    100,        'Max Concurrent Orders',    group = STRATEGY_GROUP,   minval = 1, maxval = 100)
 entryFibInput                   = input.string( FIB_0,      'Entry Fib Level',          group = STRATEGY_GROUP,   options = [FIB_0, FIB_025, FIB_05, FIB_075, FIB_1], tooltip = 'Where inside the FVG the limit entry sits, from the near (proximal) edge toward the far (distal) edge. 0 = near edge (current behavior), 0.25 = 25% in, 0.5 = midpoint (CE), 0.75 = 75% in, 1 = far (deepest fill) edge. For a long the near edge is the FVG top and deeper means a lower price; for a short the near edge is the FVG bottom and deeper means a higher price.')
 
-showArrowInput                  = input.bool(   true,       'Show Trade Arrows',        group = ARROW_GROUP, tooltip = 'Draw a single arrow per trade once it CLOSES, from entry point to exit point. Green = trade won (TP), Red = trade lost (SL). Arrows are kept permanently.')
-tpArrowColorInput               = input.color(  #089981,    'Win (TP)',                 group = ARROW_GROUP, inline = 'arrow')
-slArrowColorInput               = input.color(  #F23645,    'Loss (SL)',                group = ARROW_GROUP, inline = 'arrow')
+showProjectionInput             = input.bool(   true,       'Show Trade Projection',    group = PROJECTION_GROUP, tooltip = 'Draw a live two-zone projection per trade: a TP-zone box (entry->TP) and an SL-zone box (entry->SL) split by a dotted entry line. Drawn at entry, extended to the current bar each bar while the position is open, then frozen at the bar where SL/TP is hit. Projections are kept permanently.')
+tpZoneColorInput                = input.color(color.new(#2962ff, 80), 'TP Zone',        group = PROJECTION_GROUP, inline = 'proj')
+slZoneColorInput                = input.color(color.new(#9c27b0, 80), 'SL Zone',        group = PROJECTION_GROUP, inline = 'proj')
+entryLineColorInput             = input.color(  color.gray, 'Entry Line',               group = PROJECTION_GROUP, inline = 'proj')
 
 showDashboardInput              = input.bool(   true,       'Show Dashboard',           group = DASHBOARD_GROUP, tooltip = 'Show a mini stats table with win rate, net points won, max losing streak and max winning streak.')
 dashboardPositionInput          = input.string( DASH_TOP_RIGHT, 'Position',             group = DASHBOARD_GROUP, options = [DASH_TOP_LEFT, DASH_TOP_CENTER, DASH_TOP_RIGHT, DASH_MID_LEFT, DASH_MID_CENTER, DASH_MID_RIGHT, DASH_BOT_LEFT, DASH_BOT_CENTER, DASH_BOT_RIGHT])
@@ -141,12 +142,15 @@ type structFvg
     box   bx
     bool  frozen = false
 
-// @type                            UDT for a placed strategy order (cap tracking only)
+// @type                            UDT for a placed strategy order (cap tracking + live projection)
 // @field id                        unique entry id used by strategy.entry/strategy.exit
 // @field entry/sl/tp               order price levels
 // @field isLong                    trade direction
 // @field filled                    set true once the order's position opens; used by
-//                                  pruneTradeOrders to detect a subsequent close and free a cap slot
+//                                  maintainTradeProjections to detect a subsequent close and free a cap slot
+// @field tpBox/slBox/entryLine     the live projection drawing handles (TP zone, SL zone, dotted entry line)
+// @field drawn                     the projection has been created (at fill or same-bar close)
+// @field frozen                    the projection right edge has been frozen at the exit bar (no more extending)
 type tradeOrder
     string id
     float  entry
@@ -154,6 +158,11 @@ type tradeOrder
     float  tp
     bool   isLong
     bool   filled = false
+    box    tpBox     = na
+    box    slBox     = na
+    line   entryLine = na
+    bool   drawn     = false
+    bool   frozen    = false
 
 // @type                            UDT representing trend bias
 // @field bias                      BULLISH or BEARISH
@@ -364,8 +373,8 @@ maintainStructFvgs() =>
 
 // @function            place a pending LIMIT order inside an FVG at the selected fib level,
 //                      with SL/TP in points. Guarded by the concurrent-order cap. The on-chart
-//                      outcome arrow (entry->exit) is drawn later, once the trade closes, by
-//                      pruneTradeOrders - not here.
+//                      two-zone projection is created later, once the order fills, and extended
+//                      each bar until close by maintainTradeProjections - not here.
 // @param isBull        true for a long (bullish FVG), false for a short (bearish FVG)
 // @param nearEdge      proximal edge price (fib 0)
 // @param farEdge       distal edge price (fib 1); entry = nearEdge + fib*(farEdge - nearEdge)
@@ -397,16 +406,17 @@ placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
         tradeOrders.push(tradeOrder.new(id, entry, sl, tp, isBull))
     true
 
-// @function            true if the given entry id currently has an open position
+// @function            index of the OPEN-trade record matching the given entry id, or -1.
+//                      Returns the last match and doubles as the "is open" test (idx >= 0).
 // @param id            the strategy.entry id to look up
-// @returns             bool
-orderIsOpen(string id) =>
-    bool found = false
+// @returns             int (open-trade index, or -1 if not open)
+openTradeIndex(string id) =>
+    int idx = -1
     if strategy.opentrades > 0
         for k = 0 to strategy.opentrades - 1
             if strategy.opentrades.entry_id(k) == id
-                found := true
-    found
+                idx := k
+    idx
 
 // @function            index of the closed-trade record matching the given entry id, or -1.
 //                      Returns the last match so a re-used id resolves to its latest close.
@@ -420,63 +430,75 @@ closedTradeIndex(string id) =>
                 idx := k
     idx
 
-// @function            draw a permanent outcome arrow for a closed trade: a straight shaft
-//                      from the entry point to the exit point plus an arrowhead label at the
-//                      exit end. Color is green when the trade won (profit > 0) and red when
-//                      it lost. Uses xloc.bar_index so the shaft is a clean diagonal.
-//                      Arrowhead approach: Pine `line` has no native arrowhead, so we draw the
-//                      shaft with line.new(...) and place a label.new(...) at the exit end using
-//                      an arrow-style label (style_arrowdown when the exit is below the entry,
-//                      style_arrowup when above) with matching color and no text. Arrows are
-//                      NEVER deleted (kept permanently per the user's request).
-// @param k             closed-trade index (from closedTradeIndex)
+// @function            create the two-zone projection drawings for a tracked order and store
+//                      the handles on the UDT. Draws a TP-zone box (entry->TP), an SL-zone box
+//                      (entry->SL) and a dotted horizontal entry line, all from entryBar to
+//                      rightBar using xloc.bar_index. Sets t.drawn = true. Does nothing when
+//                      showProjectionInput is off or the order was already drawn.
+// @param t             the tracked order to attach drawings to (mutated: tpBox/slBox/entryLine/drawn)
+// @param entryBar      bar_index where the position filled (projection left edge)
+// @param rightBar      initial right edge (current bar for a live fill, exit bar for same-bar close)
 // @returns             void
-drawTradeArrow(int k) =>
-    if showArrowInput and k >= 0
-        int   entryBar   = strategy.closedtrades.entry_bar_index(k)
-        float entryPrice = strategy.closedtrades.entry_price(k)
-        int   exitBar    = strategy.closedtrades.exit_bar_index(k)
-        float exitPrice  = strategy.closedtrades.exit_price(k)
-        // Realized profit sign decides the color: > 0 => win (green TP), else loss (red SL).
-        color arrowColor = strategy.closedtrades.profit(k) > 0 ? tpArrowColorInput : slArrowColorInput
-        if not na(entryBar) and not na(exitBar) and not na(entryPrice) and not na(exitPrice)
-            line.new(entryBar, entryPrice, exitBar, exitPrice, xloc = xloc.bar_index, color = arrowColor, width = 2)
-            // Arrowhead at the exit end: point down when the trade resolved below entry,
-            // up when it resolved above entry. No text, same color as the shaft.
-            string headStyle = exitPrice < entryPrice ? label.style_arrowdown : label.style_arrowup
-            label.new(exitBar, exitPrice, '', xloc = xloc.bar_index, color = arrowColor, textcolor = arrowColor, style = headStyle, size = size.small)
+drawProjection(tradeOrder t, int entryBar, int rightBar) =>
+    if showProjectionInput and not t.drawn and not na(entryBar) and not na(rightBar) and not na(t.entry) and not na(t.sl) and not na(t.tp)
+        // TP zone spans vertically from entry to tp; SL zone from entry to sl. Order the
+        // top/bottom by value so box.new gets a valid (top >= bottom) pair either direction.
+        t.tpBox     := box.new(entryBar, math.max(t.entry, t.tp), rightBar, math.min(t.entry, t.tp), xloc = xloc.bar_index, border_color = color.new(tpZoneColorInput, 0), bgcolor = tpZoneColorInput)
+        t.slBox     := box.new(entryBar, math.max(t.entry, t.sl), rightBar, math.min(t.entry, t.sl), xloc = xloc.bar_index, border_color = color.new(slZoneColorInput, 0), bgcolor = slZoneColorInput)
+        t.entryLine := line.new(entryBar, t.entry, rightBar, t.entry, xloc = xloc.bar_index, style = line.style_dotted, color = entryLineColorInput)
+        t.drawn     := true
     true
 
-// @function            keep the concurrent-order cap honest AND draw the outcome arrow once
-//                      a trade closes. Marks orders filled once their position opens, then
-//                      when an entry's trade has closed it (a) looks up the closed-trade
-//                      record, (b) draws the entry->exit arrow (green win / red loss), and
-//                      (c) removes the entry from the cap-tracking array. Drawing in the same
-//                      step the entry is removed guarantees the arrow is drawn exactly ONCE.
-//                      Closes are detected via direct closed-trade lookup, so a limit that
-//                      fills and hits SL/TP within the SAME bar (never observed open by this
-//                      once-per-confirmed-bar prune) still draws its arrow and frees its slot.
-//                      Arrows are NEVER deleted - only the cap-tracking array entry is removed;
-//                      the line/label drawings persist on the chart permanently.
-// NOTE: because arrows are kept permanently, a very long session with many closed trades can
-//       accumulate lines/labels past max_lines_count/max_labels_count=500, after which Pine
-//       silently drops the oldest. Accepted per the user's request that arrows stay drawn.
+// @function            keep the concurrent-order cap honest AND maintain each trade's live
+//                      two-zone projection. Per tracked order, each bar:
+//                        - if the position just OPENED and isn't drawn yet, create the
+//                          projection from the fill bar/price to the current bar (live left edge);
+//                        - while the position stays OPEN (drawn, not frozen), extend the right
+//                          edge of both zone boxes and the entry line to the current bar;
+//                        - when the trade has CLOSED, freeze the right edge at the EXIT bar for
+//                          all three drawings, mark frozen, then remove the entry from the
+//                          cap-tracking array (the drawings persist on the chart, frozen).
+//                      Closes are detected via direct closed-trade lookup, so a limit that fills
+//                      and hits SL/TP within the SAME bar (never observed open) still gets its
+//                      projection drawn directly from the closed-trade record and frozen at exit.
+//                      Projections are NEVER deleted - only the cap-tracking array entry is
+//                      removed; the box/line drawings persist on the chart permanently.
+// NOTE: because projections are kept permanently, a very long session with many closed trades
+//       can accumulate boxes/lines past max_boxes_count/max_lines_count=500, after which Pine
+//       silently drops the oldest. Accepted per the user's request that projections stay drawn.
 // @returns             void
-pruneTradeOrders() =>
+maintainTradeProjections() =>
     if tradeOrders.size() > 0
         for i = tradeOrders.size() - 1 to 0
             tradeOrder t = tradeOrders.get(i)
             int closedIdx = closedTradeIndex(t.id)
-            bool isOpen = orderIsOpen(t.id)
+            int openIdx   = openTradeIndex(t.id)
             if closedIdx >= 0
-                // trade has closed (covers same-bar fill+close, where the position was
-                // never observed open). Draw the outcome arrow ONCE, then free the cap slot.
-                drawTradeArrow(closedIdx)
+                // Trade has closed. Freeze the projection at the exit bar. If it was never
+                // drawn live (same-bar fill+close), draw it now straight from the closed-trade
+                // record so it still appears frozen. Then free the cap slot.
+                int exitBar = strategy.closedtrades.exit_bar_index(closedIdx)
+                if not t.drawn
+                    int entryBarC = strategy.closedtrades.entry_bar_index(closedIdx)
+                    drawProjection(t, entryBarC, exitBar)
+                if t.drawn and not t.frozen and not na(exitBar)
+                    t.tpBox.set_right(exitBar)
+                    t.slBox.set_right(exitBar)
+                    t.entryLine.set_x2(exitBar)
+                    t.frozen := true
                 tradeOrders.remove(i)
-            else if isOpen
-                // position is live: record the fill so we can detect its close later
+            else if openIdx >= 0
+                // Position is live: record the fill, draw the projection on first sight, then
+                // extend the right edge to the current bar each subsequent bar.
                 t.filled := true
-            // else: not filled/open and not closed => still a pending limit => keep (live)
+                if not t.drawn
+                    int entryBarO = strategy.opentrades.entry_bar_index(openIdx)
+                    drawProjection(t, entryBarO, bar_index)
+                else if not t.frozen
+                    t.tpBox.set_right(bar_index)
+                    t.slBox.set_right(bar_index)
+                    t.entryLine.set_x2(bar_index)
+            // else: not open and not closed => still a pending limit => keep (live), draw nothing
     true
 
 // @function            detect and draw structures, and highlight the FVG within a break
@@ -567,8 +589,9 @@ plotcandle(parsedOpen,high,low,close,color = candleColor, wickcolor = candleColo
 if showStructFvgInput
     maintainStructFvgs()
 
-// Keep the concurrent-order cap accurate (prune closed orders; projections stay).
-pruneTradeOrders()
+// Maintain live trade projections (draw at fill, extend each bar, freeze at exit) and keep
+// the concurrent-order cap accurate (prune closed orders; frozen projections stay on chart).
+maintainTradeProjections()
 
 getCurrentStructure(swingsLengthInput,false)
 getCurrentStructure(5,false,true)
