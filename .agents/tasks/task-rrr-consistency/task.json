@@ -1,0 +1,24 @@
+{
+  "task_id": "task-rrr-consistency",
+  "task_description": "Fix inconsistent realized Reward:Risk / per-trade P&L in smc_fvg_strategy.pine on XAUUSD (SL=4, TP Mode=RRR, RRR=10, Entry=Market). Root cause: opposite-direction reversal-netting under Pine's single net position (pyramiding stacks only same-direction entries; an opposite-direction strategy.entry closes open opposite trades at the reversal price, not their own from_entry SL/TP), which decouples realized P&L from the configured 4/40 distances. Fix by gating placeStrategyOrder to skip an entry that conflicts with an already-open opposite-direction position, so every filled trade exits via its own SL/TP and realized R:R matches configured RRR. Remaining variance from inherent bar-model gap slippage on a tiny SL is a settings/instrument reality (SL too small for gold's bar size), not a code bug. Edit only smc_fvg_strategy.pine; branch fix/rrr-consistency.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "skipped",
+    "tests": "skipped",
+    "test_quality": "skipped",
+    "docker_build": "skipped",
+    "summary": "No local Pine Script toolchain (no compiler/backtester), so build/test/docker are N/A. Verified by static Pine v5 semantics reasoning + a 3-pass semantic review (v1/v2 NEEDS_CHANGES, v3 APPROVED). Fix across commits 76f8e0f, a4607ca, 65d2c74: (1) directionOk guard in placeStrategyOrder blocks an entry opposite to the net filled position (strategy.position_size) AND to any un-closed tracked order in tradeOrders (isLong scan), closing the across-bar, same-bar (internal vs swing), and pending-limit reversal-netting paths; (2) never-filled LIMIT orders get a bounded lifetime (isLimit/submitBar UDT fields + limitExpiryInput input; maintainTradeProjections calls strategy.cancel + removes them after limitExpiryInput bars) so a stale resting limit can no longer permanently block the opposite direction; (3) exit tick math loss=slPoints/mintick, profit=tpDist/mintick, tpDist=RRR*slPoints unchanged so tpDist:slDist=RRR:1 preserved; (4) Pine constraints hold: both touched void funcs end with trailing true, downward removal loop is index-safe, no break/continue, no global scalar reassigned inside a function, new input at global scope; (5) git diff origin/main confined to smc_fvg_strategy.pine (tradeOrder UDT, one new STRATEGY_GROUP input, placeStrategyOrder, maintainTradeProjections) plus task-state files. Unrelated behavior (structure/FVG/projection/dashboard/VWAP/entry modes/cap) untouched. Residual (non-code): inherent bar-model gap slippage on a 4-point SL relative to gold's bar size is a settings/instrument reality. User MUST re-backtest in TradingView in BOTH Market and Limit modes."
+  },
+  "review": {
+    "iterations": 3,
+    "final_verdict": "APPROVED",
+    "final_review_file": ".agents/tasks/task-rrr-consistency/2026-09-14-090727-review.md",
+    "non_blocking_notes": [
+      "Limit expiry is time-based (limitExpiryInput bars), decoupled from FVG validity; tunable trade-off, default 50 bars, user should tune per timeframe.",
+      "Expiry uses > limitExpiryInput so an order rests limitExpiryInput+1 bars (errs safe, never cancels early).",
+      "Re-backtest in TradingView (XAUUSD SL=4 RRR=10, Market and Limit modes) is the user's confirmation step, not a blocker."
+    ]
+  }
+}
