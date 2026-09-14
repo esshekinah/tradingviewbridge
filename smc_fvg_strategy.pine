@@ -106,7 +106,6 @@ tpPointsInput                   = input.float(  5000,       'Take Profit (points
 tpModeInput                     = input.string( TP_POINTS,  'TP Mode',                  group = STRATEGY_GROUP,   options = [TP_POINTS, TP_RRR], tooltip = 'Points: TP is a fixed point distance. RRR: TP distance = RRR x Stop Loss point distance.')
 rrrInput                        = input.float(  3,          'Reward:Risk (RRR)',        group = STRATEGY_GROUP,   minval = 0, tooltip = 'Used when TP Mode = RRR. TP distance = RRR x SL points.')
 entryModeInput                  = input.string( ENTRY_LIMIT,'Entry Mode',               group = STRATEGY_GROUP,   options = [ENTRY_LIMIT, ENTRY_MARKET], tooltip = 'Limit: pending limit order at the FVG fib level (waits for pullback). Market: enter immediately at candle close when the BOS/CHoCH+FVG is confirmed. Fib level applies only in Limit mode.')
-orderQtyInput                   = input.float(  1,          'Order Size (contracts)',   group = STRATEGY_GROUP,   minval = 0)
 maxOrdersInput                  = input.int(    100,        'Max Concurrent Orders',    group = STRATEGY_GROUP,   minval = 1, maxval = 100)
 entryFibInput                   = input.string( FIB_0,      'Entry Fib Level',          group = STRATEGY_GROUP,   options = [FIB_0, FIB_025, FIB_05, FIB_075, FIB_1], tooltip = 'Where inside the FVG the limit entry sits, from the near (proximal) edge toward the far (distal) edge. 0 = near edge (current behavior), 0.25 = 25% in, 0.5 = midpoint (CE), 0.75 = 75% in, 1 = far (deepest fill) edge. For a long the near edge is the FVG top and deeper means a lower price; for a short the near edge is the FVG bottom and deeper means a higher price.')
 
@@ -427,9 +426,9 @@ placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
         string id = (isBull ? 'L' : 'S') + str.tostring(bar_index) + '_' + str.tostring(tradeOrders.size())
 
         if isMarket
-            strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput)
+            strategy.entry(id, isBull ? strategy.long : strategy.short)
         else
-            strategy.entry(id, isBull ? strategy.long : strategy.short, qty = orderQtyInput, limit = entry)
+            strategy.entry(id, isBull ? strategy.long : strategy.short, limit = entry)
         // Anchor SL/TP to the ACTUAL fill price rather than a predicted entry. strategy.exit
         // loss/profit are DISTANCES in ticks (mintick increments) measured from each position's
         // real average entry price, so Pine places the stop/limit correctly for both a market
