@@ -3,5 +3,12 @@
   "task_description": "Fix inconsistent realized Reward:Risk / per-trade P&L in smc_fvg_strategy.pine on XAUUSD (SL=4, TP Mode=RRR, RRR=10, Entry=Market). Root cause: opposite-direction reversal-netting under Pine's single net position (pyramiding stacks only same-direction entries; an opposite-direction strategy.entry closes open opposite trades at the reversal price, not their own from_entry SL/TP), which decouples realized P&L from the configured 4/40 distances. Fix by gating placeStrategyOrder to skip an entry that conflicts with an already-open opposite-direction position, so every filled trade exits via its own SL/TP and realized R:R matches configured RRR. Remaining variance from inherent bar-model gap slippage on a tiny SL is a settings/instrument reality (SL too small for gold's bar size), not a code bug. Edit only smc_fvg_strategy.pine; branch fix/rrr-consistency.",
   "status": "completed",
   "feature_order": ["FEAT-001"],
-  "blocked_reason": null
+  "blocked_reason": null,
+  "verification": {
+    "build": "skipped",
+    "tests": "skipped",
+    "test_quality": "skipped",
+    "docker_build": "skipped",
+    "summary": "No local Pine Script toolchain exists (no compiler/backtester), so build/test/docker are N/A. Verification is static Pine v5 semantics review: (1) directionOk guard (isBull ? position_size>=0 : position_size<=0) wraps the entry+exit+tradeOrders.push block, preventing opposite-direction reversal-netting; (2) exit tick math loss=slPoints/mintick, profit=tpDist/mintick unchanged so tpDist:slDist=RRR:1 preserved; (3) function still ends with trailing true, no global scalar reassigned, no break/continue; (4) git diff confined to placeStrategyOrder + its doc comment in smc_fvg_strategy.pine plus task-state files. Unrelated behavior (structure/FVG/projection/dashboard/VWAP/entry modes/cap) untouched. User MUST re-backtest in TradingView."
+  }
 }
