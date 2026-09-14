@@ -107,6 +107,7 @@ tpModeInput                     = input.string( TP_POINTS,  'TP Mode',          
 rrrInput                        = input.float(  3,          'Reward:Risk (RRR)',        group = STRATEGY_GROUP,   minval = 0, tooltip = 'Used when TP Mode = RRR. TP distance = RRR x SL points.')
 entryModeInput                  = input.string( ENTRY_LIMIT,'Entry Mode',               group = STRATEGY_GROUP,   options = [ENTRY_LIMIT, ENTRY_MARKET], tooltip = 'Limit: pending limit order at the FVG fib level (waits for pullback). Market: enter immediately at candle close when the BOS/CHoCH+FVG is confirmed. Fib level applies only in Limit mode.')
 maxOrdersInput                  = input.int(    100,        'Max Concurrent Orders',    group = STRATEGY_GROUP,   minval = 1, maxval = 100)
+limitExpiryInput                = input.int(    50,         'Limit Order Expiry (bars)',group = STRATEGY_GROUP,   minval = 1, tooltip = 'A pending LIMIT entry that never fills within this many bars is cancelled and removed from tracking. Prevents a stale resting limit from permanently blocking the opposite direction via the direction-conflict guard. Only applies in Limit entry mode; market orders always fill next bar.')
 entryFibInput                   = input.string( FIB_0,      'Entry Fib Level',          group = STRATEGY_GROUP,   options = [FIB_0, FIB_025, FIB_05, FIB_075, FIB_1], tooltip = 'Where inside the FVG the limit entry sits, from the near (proximal) edge toward the far (distal) edge. 0 = near edge (current behavior), 0.25 = 25% in, 0.5 = midpoint (CE), 0.75 = 75% in, 1 = far (deepest fill) edge. For a long the near edge is the FVG top and deeper means a lower price; for a short the near edge is the FVG bottom and deeper means a higher price.')
 
 showProjectionInput             = input.bool(   true,       'Show Trade Projection',    group = PROJECTION_GROUP, tooltip = 'Draw a live two-zone projection per trade: a TP-zone box (entry->TP) and an SL-zone box (entry->SL) split by a dotted entry line. Drawn at entry, extended to the current bar each bar while the position is open, then frozen at the bar where SL/TP is hit. Projections are kept permanently.')
@@ -160,6 +161,10 @@ type structFvg
 // @field isLong                    trade direction
 // @field filled                    set true once the order's position opens; used by
 //                                  maintainTradeProjections to detect a subsequent close and free a cap slot
+// @field isLimit                   true if submitted as a pending LIMIT entry (subject to expiry);
+//                                  a market entry always fills next bar so it never expires
+// @field submitBar                 bar_index when the order was submitted; used to expire a
+//                                  never-filled LIMIT after a bounded number of bars
 // @field tpBox/slBox/entryLine     the live projection drawing handles (TP zone, SL zone, dotted entry line)
 // @field drawn                     the projection has been created (at fill or same-bar close)
 // @field frozen                    the projection right edge has been frozen at the exit bar (no more extending)
@@ -172,6 +177,8 @@ type tradeOrder
     float  slDist   = na
     float  tpDist   = na
     bool   filled = false
+    bool   isLimit  = false
+    int    submitBar = na
     box    tpBox     = na
     box    slBox     = na
     line   entryLine = na
@@ -427,6 +434,13 @@ vwapAllowsShort() =>
 //                      Same-direction adds to the pyramid and a flat book with no opposing tracked
 //                      order opens fresh, but an opposing signal submits nothing (no entry, no exit,
 //                      no cap slot, no projection) while any opposite position/order is live.
+//                      PENDING-LIMIT LIFECYCLE: because the guard scans tradeOrders, a resting LIMIT
+//                      that NEVER fills (neither open nor closed, so never pruned on close) would
+//                      otherwise linger forever and permanently block the opposite direction. To
+//                      bound that, maintainTradeProjections expires such an order - strategy.cancel
+//                      on its id plus removal from tradeOrders - once bar_index - submitBar exceeds
+//                      limitExpiryInput bars. A market order always fills next bar, so only limits
+//                      are subject to expiry.
 //                      NOTE: this cannot remove inherent bar-model gap slippage - with a small SL
 //                      relative to the instrument's bar size and calc_on_every_tick=false, a bar
 //                      can gap through the level so a single realized fill exceeds it (and a bar
@@ -483,7 +497,12 @@ placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
         float tpTicks = tpDist / syminfo.mintick
         strategy.exit(id + '_x', from_entry = id, loss = slTicks, profit = tpTicks)
 
-        tradeOrders.push(tradeOrder.new(id, entry, sl, tp, isBull, slPointsInput, tpDist))
+        // Record isLimit + submitBar so maintainTradeProjections can expire a never-filled
+        // limit after limitExpiryInput bars (a market order always fills next bar, never expires).
+        tradeOrder o = tradeOrder.new(id, entry, sl, tp, isBull, slPointsInput, tpDist)
+        o.isLimit   := not isMarket
+        o.submitBar := bar_index
+        tradeOrders.push(o)
     true
 
 // @function            index of the OPEN-trade record matching the given entry id, or -1.
@@ -609,7 +628,19 @@ maintainTradeProjections() =>
                     t.tpBox.set_right(bar_index)
                     t.slBox.set_right(bar_index)
                     t.entryLine.set_x2(bar_index)
-            // else: not open and not closed => still a pending limit => keep (live), draw nothing
+            else
+                // Not open and not closed => still a pending order (a resting LIMIT that has not
+                // filled). A market order always fills next bar, so anything lingering here is a
+                // limit. Give it a BOUNDED lifetime: once bar_index - submitBar exceeds
+                // limitExpiryInput, cancel the resting order (keeps Pine's order book in sync) and
+                // remove it from tradeOrders. Without this a never-filled limit lives forever and
+                // the direction-conflict guard (which scans tradeOrders) would turn it into a
+                // PERMANENT one-directional block. A pending limit was never filled so it was never
+                // drawn (drawProjection runs only on fill/close) - nothing to freeze, just remove.
+                // Removal here is index-safe because the loop iterates DOWNWARD.
+                if t.isLimit and not na(t.submitBar) and bar_index - t.submitBar > limitExpiryInput
+                    strategy.cancel(t.id)
+                    tradeOrders.remove(i)
     true
 
 // @function            detect and draw structures, and highlight the FVG within a break
