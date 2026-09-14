@@ -414,10 +414,19 @@ vwapAllowsShort() =>
 //                      realized P&L from the configured SL/TP distances and breaks the intended
 //                      Reward:Risk ratio (e.g. all winners on one side, all losers on the other,
 //                      inconsistent per-trade amounts). To keep every filled trade exiting at its
-//                      own from_entry SL/TP, we SKIP an entry whose direction is opposite to an
-//                      already-open position (via strategy.position_size): same-direction adds to
-//                      the pyramid and flat opens fresh, but an opposing signal submits nothing
-//                      (no entry, no exit, no cap slot, no projection) while a position is open.
+//                      own from_entry SL/TP, we SKIP an entry whose direction conflicts with either
+//                      an already-open position OR an already-submitted-but-not-yet-closed order:
+//                        - strategy.position_size guards the ACROSS-BAR, already-filled case
+//                          (opposite to the current net position);
+//                        - scanning tradeOrders (which holds every order until it closes, each with
+//                          its isLong direction) additionally guards the SAME-BAR case - both
+//                          displayStructure(true) (internal) and displayStructure() (swing) run each
+//                          bar and read the same pre-bar position_size, so a same-bar internal-long +
+//                          swing-short pair would otherwise both pass - and the PENDING-LIMIT case,
+//                          where a resting opposite limit has not moved position_size yet.
+//                      Same-direction adds to the pyramid and a flat book with no opposing tracked
+//                      order opens fresh, but an opposing signal submits nothing (no entry, no exit,
+//                      no cap slot, no projection) while any opposite position/order is live.
 //                      NOTE: this cannot remove inherent bar-model gap slippage - with a small SL
 //                      relative to the instrument's bar size and calc_on_every_tick=false, a bar
 //                      can gap through the level so a single realized fill exceeds it (and a bar
@@ -428,9 +437,21 @@ vwapAllowsShort() =>
 // @param farEdge       distal edge price (fib 1); entry = nearEdge + fib*(farEdge - nearEdge)
 // @returns             void
 placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
-    // Skip an entry that conflicts with an already-open opposite-direction position so it
-    // cannot reversal-net and close open trades at a non-SL/TP price (see doc comment above).
-    bool directionOk = isBull ? strategy.position_size >= 0 : strategy.position_size <= 0
+    // Skip an entry that conflicts with an already-open OR already-submitted opposite-direction
+    // order so it cannot reversal-net and close open/pending trades at a non-SL/TP price (see
+    // doc comment above). strategy.position_size alone only reflects ALREADY-FILLED orders, so it
+    // misses (a) a same-bar opposite entry submitted earlier this bar by the other displayStructure
+    // pass (both read the same pre-bar position_size), and (b) a pending Limit order that has not
+    // moved position_size yet. tradeOrders records every submitted-but-not-yet-closed order (with
+    // its isLong direction) and is only pruned once a trade closes, so scanning it for an opposing
+    // entry closes both residual paths. Array read/mutation inside a function is allowed in Pine v5.
+    bool posConflict     = isBull ? strategy.position_size < 0 : strategy.position_size > 0
+    bool trackedConflict = false
+    if tradeOrders.size() > 0
+        for i = 0 to tradeOrders.size() - 1
+            if tradeOrders.get(i).isLong != isBull
+                trackedConflict := true
+    bool directionOk = not posConflict and not trackedConflict
     if directionOk and not na(nearEdge) and not na(farEdge) and tradeOrders.size() < maxOrdersInput
         // Entry Mode: Limit (default) waits for a pullback to the fib level inside the
         // FVG; Market enters immediately at candle close (fib level ignored). In market
