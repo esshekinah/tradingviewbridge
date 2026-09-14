@@ -403,12 +403,35 @@ vwapAllowsShort() =>
 //                      with SL/TP in points. Guarded by the concurrent-order cap. The on-chart
 //                      two-zone projection is created later, once the order fills, and extended
 //                      each bar until close by maintainTradeProjections - not here.
+//
+//                      DIRECTION-CONFLICT GUARD: a Pine strategy holds a SINGLE net position and
+//                      pyramiding only stacks entries in the SAME direction. An entry opposite to
+//                      the currently-open position does NOT open an independent hedged trade - it
+//                      first CLOSES all open opposite-direction trades at the opposing signal's
+//                      fill price (reversal-netting) and then flips. Those force-closed trades
+//                      realize P&L at that reversal price, NOT at their own from_entry SL/TP, and
+//                      their strategy.exit orders are cancelled with the entry. That decouples
+//                      realized P&L from the configured SL/TP distances and breaks the intended
+//                      Reward:Risk ratio (e.g. all winners on one side, all losers on the other,
+//                      inconsistent per-trade amounts). To keep every filled trade exiting at its
+//                      own from_entry SL/TP, we SKIP an entry whose direction is opposite to an
+//                      already-open position (via strategy.position_size): same-direction adds to
+//                      the pyramid and flat opens fresh, but an opposing signal submits nothing
+//                      (no entry, no exit, no cap slot, no projection) while a position is open.
+//                      NOTE: this cannot remove inherent bar-model gap slippage - with a small SL
+//                      relative to the instrument's bar size and calc_on_every_tick=false, a bar
+//                      can gap through the level so a single realized fill exceeds it (and a bar
+//                      trading through both SL and TP is assumed SL-first). That is a settings /
+//                      instrument reality (SL too small for the bar size), not a code bug.
 // @param isBull        true for a long (bullish FVG), false for a short (bearish FVG)
 // @param nearEdge      proximal edge price (fib 0)
 // @param farEdge       distal edge price (fib 1); entry = nearEdge + fib*(farEdge - nearEdge)
 // @returns             void
 placeStrategyOrder(bool isBull, float nearEdge, float farEdge) =>
-    if not na(nearEdge) and not na(farEdge) and tradeOrders.size() < maxOrdersInput
+    // Skip an entry that conflicts with an already-open opposite-direction position so it
+    // cannot reversal-net and close open trades at a non-SL/TP price (see doc comment above).
+    bool directionOk = isBull ? strategy.position_size >= 0 : strategy.position_size <= 0
+    if directionOk and not na(nearEdge) and not na(farEdge) and tradeOrders.size() < maxOrdersInput
         // Entry Mode: Limit (default) waits for a pullback to the fib level inside the
         // FVG; Market enters immediately at candle close (fib level ignored). In market
         // mode the reference price for SL/TP and the projection is the candle close.
